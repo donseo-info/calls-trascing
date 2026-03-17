@@ -1,7 +1,6 @@
-/* ct.js — call tracking widget v1.1.0 */
+/* ct.js — call tracking widget v1.1.2 */
 (function () {
   'use strict';
-
   var scriptEl = document.currentScript;
 
   var apiUrl = (function () {
