@@ -9,6 +9,9 @@
     return src.replace(/\/ct\.js(\?.*)?$/, '/api/assign.php');
   })();
 
+  // data-utm-only="1" — подмена только если есть utm_source (в URL или sessionStorage)
+  var utmOnly = scriptEl && scriptEl.dataset.utmOnly === '1';
+
   // ── Форматирование номера ─────────────────────────────────────────
   function formatPhone(raw) {
     var d = raw.replace(/\D/g, '');
@@ -223,12 +226,20 @@
     }
 
     if (widget.dataset.loading) return;
+
+    var utms = getUtms();
+
+    // Если включён режим utm-only — подмена только при наличии utm_source
+    if (utmOnly && !utms.utm_source) {
+      if (widget.dataset.fallback) revealPhone(widget, widget.dataset.fallback);
+      return;
+    }
+
     widget.dataset.loading = '1';
 
     // clientId уже получен на старте — идём в API без задержки.
     // Если по какой-то причине ещё не готов — используем пустую строку.
     var clientId = _cachedClientId;
-    var utms     = getUtms();
     var params   = new URLSearchParams({
       client_id:    clientId,
       landing_page: window.location.href,
