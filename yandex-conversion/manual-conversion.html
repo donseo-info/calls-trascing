@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ручная передача конверсий в Яндекс Метрику</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: #f8f9fa;
+            padding: 40px 0;
+        }
+        .container {
+            max-width: 600px;
+        }
+        .card {
+            border: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        .card-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 20px;
+        }
+        .form-label {
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+        .required {
+            color: #dc3545;
+        }
+        .alert {
+            border-radius: 8px;
+        }
+        .btn-submit {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            padding: 12px 30px;
+            font-weight: 500;
+        }
+        .btn-submit:hover {
+            background: linear-gradient(135deg, #5568d3 0%, #6a3f8f 100%);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        .form-control:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+        }
+        .help-text {
+            font-size: 0.875rem;
+            color: #6c757d;
+            margin-top: 4px;
+        }
+        .form-check {
+            margin-top: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="mb-0">📊 Ручная передача конверсий в Яндекс Метрику</h3>
+            </div>
+            <div class="card-body p-4">
+                <!-- Сообщения об успехе/ошибке -->
+                <div id="alert-container"></div>
+
+                <form id="conversionForm">
+                    <!-- ClientId (опционально) -->
+                    <div class="mb-3">
+                        <label for="client_id" class="form-label">
+                            ClientId
+                        </label>
+                        <input 
+                            type="text" 
+                            class="form-control" 
+                            id="client_id" 
+                            name="client_id" 
+                            placeholder="Введите ClientId из Яндекс Метрики (опционально)"
+                        >
+                        <div class="help-text">
+                            ClientId - уникальный идентификатор пользователя из Яндекс Метрики (если есть)
+                        </div>
+                    </div>
+
+                    <!-- Телефон -->
+                    <div class="mb-3">
+                        <label for="phone" class="form-label">
+                            Телефон <span class="required">*</span> <small>(если нет ClientId)</small>
+                        </label>
+                        <input 
+                            type="tel" 
+                            class="form-control" 
+                            id="phone" 
+                            name="phone" 
+                            placeholder="+79991234567 или 89991234567"
+                        >
+                        <div class="help-text">
+                            Номер телефона для поиска визитов пользователя. Обязателен, если не указан ClientId.
+                        </div>
+                    </div>
+
+                    <!-- Email -->
+                    <div class="mb-3">
+                        <label for="email" class="form-label">
+                            Email <span class="required">*</span> <small>(если нет ClientId)</small>
+                        </label>
+                        <input 
+                            type="email" 
+                            class="form-control" 
+                            id="email" 
+                            name="email" 
+                            placeholder="example@mail.ru"
+                        >
+                        <div class="help-text">
+                            Email адрес для поиска визитов пользователя. Обязателен, если не указан ClientId.
+                        </div>
+                    </div>
+
+                    <!-- Использовать MD5 -->
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input 
+                                class="form-check-input" 
+                                type="checkbox" 
+                                id="use_md5" 
+                                name="use_md5"
+                            >
+                            <label class="form-check-label" for="use_md5">
+                                Использовать MD5 хеши для телефона и email
+                            </label>
+                        </div>
+                        <div class="help-text">
+                            Если включено, телефон и email будут переданы как MD5 хеши (phones_md5, emails_md5)
+                        </div>
+                    </div>
+
+                    <!-- Название цели -->
+                    <div class="mb-3">
+                        <label for="goal_name" class="form-label">
+                            Название цели <span class="required">*</span>
+                        </label>
+                        <input 
+                            type="text" 
+                            class="form-control" 
+                            id="goal_name" 
+                            name="goal_name" 
+                            placeholder="например: larin_new_lead"
+                            required
+                        >
+                        <div class="help-text">
+                            Название цели, настроенной в Яндекс Метрике
+                        </div>
+                    </div>
+
+                    <!-- ID счетчика -->
+                    <div class="mb-3">
+                        <label for="counter_id" class="form-label">
+                            ID счетчика Метрики <span class="required">*</span>
+                        </label>
+                        <input 
+                            type="text" 
+                            class="form-control" 
+                            id="counter_id" 
+                            name="counter_id" 
+                            placeholder="например: 87344948"
+                            required
+                        >
+                        <div class="help-text">
+                            Числовой ID счетчика Яндекс Метрики
+                        </div>
+                    </div>
+
+                    <!-- Дата и время -->
+                    <div class="mb-3">
+                        <label for="date_time" class="form-label">
+                            Дата и время конверсии <span class="required">*</span>
+                        </label>
+                        <input 
+                            type="datetime-local" 
+                            class="form-control" 
+                            id="date_time" 
+                            name="date_time" 
+                            required
+                        >
+                        <div class="help-text">
+                            Дата и время, когда произошла конверсия (будет преобразовано в Unix timestamp)
+                        </div>
+                    </div>
+
+                    <!-- Кнопка отправки -->
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary btn-submit" id="submitBtn">
+                            <span id="submitText">Отправить конверсию</span>
+                            <span id="submitSpinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Информация -->
+        <div class="card mt-3">
+            <div class="card-body">
+                <h6 class="card-title">ℹ️ Информация</h6>
+                <p class="card-text small mb-0">
+                    <strong>Идентификаторы:</strong> Необходимо указать хотя бы один: ClientId, телефон или email. Метрика найдет визиты пользователя по этим данным.<br>
+                    <strong>Формат даты:</strong> Дата и время автоматически преобразуются в Unix timestamp (секунды с 1970-01-01).<br>
+                    <strong>MD5 хеши:</strong> Если включена опция, телефон и email будут переданы как MD5 хеши для дополнительной защиты данных.<br>
+                    <strong>Цель:</strong> Должна быть предварительно настроена в Яндекс Метрике.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('conversionForm');
+        const submitBtn = document.getElementById('submitBtn');
+        const submitText = document.getElementById('submitText');
+        const submitSpinner = document.getElementById('submitSpinner');
+        const alertContainer = document.getElementById('alert-container');
+
+        // Устанавливаем текущую дату и время по умолчанию
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        document.getElementById('date_time').value = `${year}-${month}-${day}T${hours}:${minutes}`;
+
+        form.addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            // Получаем данные формы
+            const formData = new FormData(form);
+            const dateTimeValue = formData.get('date_time');
+            
+            // Преобразуем datetime-local в формат YYYY-MM-DD HH:MM:SS
+            const dateTime = new Date(dateTimeValue);
+            const formattedDateTime = formatDateTime(dateTime);
+
+            // Подготавливаем данные для отправки
+            const data = {
+                goal_name: formData.get('goal_name').trim(),
+                counter_id: formData.get('counter_id').trim(),
+                date_time: formattedDateTime,
+                use_md5: formData.get('use_md5') === 'on'
+            };
+
+            // Добавляем идентификаторы (если заполнены)
+            const clientId = formData.get('client_id').trim();
+            const phone = formData.get('phone').trim();
+            const email = formData.get('email').trim();
+
+            if (clientId) {
+                data.client_id = clientId;
+            }
+
+            if (phone) {
+                data.phone = phone;
+            }
+
+            if (email) {
+                data.email = email;
+            }
+
+            // Валидация
+            if (!data.goal_name || !data.counter_id || !data.date_time) {
+                showAlert('Пожалуйста, заполните все обязательные поля', 'danger');
+                return;
+            }
+
+            // Проверяем наличие хотя бы одного идентификатора
+            if (!data.client_id && !data.phone && !data.email) {
+                showAlert('Необходимо указать хотя бы один идентификатор: ClientId, телефон или email', 'danger');
+                return;
+            }
+
+            // Показываем спиннер
+            setLoading(true);
+
+            try {
+                const response = await fetch('manual-conversion-api.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showAlert('✅ Конверсия успешно отправлена в Яндекс Метрику!', 'success');
+                    form.reset();
+                    // Устанавливаем текущую дату и время снова
+                    const now = new Date();
+                    const year = now.getFullYear();
+                    const month = String(now.getMonth() + 1).padStart(2, '0');
+                    const day = String(now.getDate()).padStart(2, '0');
+                    const hours = String(now.getHours()).padStart(2, '0');
+                    const minutes = String(now.getMinutes()).padStart(2, '0');
+                    document.getElementById('date_time').value = `${year}-${month}-${day}T${hours}:${minutes}`;
+                } else {
+                    const errorMessage = result.error || result.errors?.join(', ') || 'Произошла ошибка при отправке';
+                    showAlert('❌ Ошибка: ' + errorMessage, 'danger');
+                }
+            } catch (error) {
+                showAlert('❌ Ошибка соединения: ' + error.message, 'danger');
+            } finally {
+                setLoading(false);
+            }
+        });
+
+        /**
+         * Форматирует дату в формат YYYY-MM-DD HH:MM:SS
+         */
+        function formatDateTime(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const seconds = String(date.getSeconds()).padStart(2, '0');
+            
+            return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+        }
+
+        /**
+         * Показывает сообщение
+         */
+        function showAlert(message, type) {
+            alertContainer.innerHTML = `
+                <div class="alert alert-${type} alert-dismissible fade show" role="alert">
+                    ${message}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            `;
+            
+            // Автоматически скрываем через 5 секунд
+            setTimeout(() => {
+                const alert = alertContainer.querySelector('.alert');
+                if (alert) {
+                    alert.classList.remove('show');
+                    setTimeout(() => alert.remove(), 150);
+                }
+            }, 5000);
+        }
+
+        /**
+         * Управление состоянием загрузки
+         */
+        function setLoading(loading) {
+            if (loading) {
+                submitBtn.disabled = true;
+                submitText.textContent = 'Отправка...';
+                submitSpinner.classList.remove('d-none');
+            } else {
+                submitBtn.disabled = false;
+                submitText.textContent = 'Отправить конверсию';
+                submitSpinner.classList.add('d-none');
+            }
+        }
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
