@@ -1,3 +1,4 @@
+/* ct.js — call tracking widget v1.1.0 */
 (function () {
   'use strict';
 
@@ -8,9 +9,6 @@
     var src = (scriptEl && scriptEl.src) || '';
     return src.replace(/\/ct\.js(\?.*)?$/, '/api/assign.php');
   })();
-
-  // data-utm-only="1" — подмена только если есть utm_source (в URL или sessionStorage)
-  var utmOnly = scriptEl && scriptEl.dataset.utmOnly === '1';
 
   // ── Форматирование номера ─────────────────────────────────────────
   function formatPhone(raw) {
@@ -92,16 +90,16 @@
     if (document.getElementById('ct-styles')) return;
     var css = [
       /* Обёртка */
-      '.ct-phone-reveal{position:relative;display:inline-flex;align-items:center;' +
-        'font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Courier New",monospace;' +
-        'font-weight:500;letter-spacing:.02em;user-select:none}',
+      '.ct-phone-reveal{position:relative;display:inline-flex;align-items:center;padding:4px 0;' +
+        '/*font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Courier New",monospace;*/' +
+        '/*font-weight:500;letter-spacing:.02em;user-select:none*/}',
 
       /* Текст номера */
       '.ct-phone-text{white-space:nowrap}',
       /* Видимая часть */
       '.ct-phone-visible{}',
       /* Fade-часть: последние цифры уходят в прозрачность под кнопку */
-      '.ct-phone-fade{display:inline-block;-webkit-mask-image:linear-gradient(to right,rgba(0,0,0,.68) 0%,transparent 53%);mask-image:linear-gradient(to right,rgba(0,0,0,.68) 0%,transparent 53%);padding-right:6.5ch}',
+      '.ct-phone-fade{display:inline-block;-webkit-mask-image:linear-gradient(to right,rgba(0,0,0,.99) 0%,transparent 60%);mask-image:linear-gradient(to right,rgba(0,0,0,.99) 0%,transparent 60%);padding-right:3.5ch}',
       /* После раскрытия — маска снимается */
       '.ct-phone-reveal.ct-revealed .ct-phone-fade{-webkit-mask-image:none;mask-image:none;padding-right:0;transition:padding .3s}',
 
@@ -111,7 +109,7 @@
         'padding:4px 10px;' +
         'background:#f3f4f6;color:#2563eb;' +
         'border-radius:999px;border:1px solid #d1d5db;' +
-        'font-size:.8em;font-weight:500;font-family:inherit;' +
+        'font-size:.5em;font-weight:500;font-family:inherit;' +
         'cursor:pointer;white-space:nowrap;' +
         'transition:background .15s,border-color .15s,opacity .25s,transform .1s;' +
         'z-index:2}',
@@ -226,20 +224,12 @@
     }
 
     if (widget.dataset.loading) return;
-
-    var utms = getUtms();
-
-    // Если включён режим utm-only — подмена только при наличии utm_source
-    if (utmOnly && !utms.utm_source) {
-      if (widget.dataset.fallback) revealPhone(widget, widget.dataset.fallback);
-      return;
-    }
-
     widget.dataset.loading = '1';
 
     // clientId уже получен на старте — идём в API без задержки.
     // Если по какой-то причине ещё не готов — используем пустую строку.
     var clientId = _cachedClientId;
+    var utms     = getUtms();
     var params   = new URLSearchParams({
       client_id:    clientId,
       landing_page: window.location.href,
