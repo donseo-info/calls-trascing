@@ -4,7 +4,7 @@
 define('DB_PATH', __DIR__ . '/db/calltracking.db');
 
 // TTL сессии в минутах (как долго номер закреплён за посетителем)
-define('SESSION_TTL_MINUTES', 15);
+define('SESSION_TTL_MINUTES', 10);
 
 // Название цели в Яндекс.Метрике
 define('METRIKA_GOAL_ID', 'send_lead');
