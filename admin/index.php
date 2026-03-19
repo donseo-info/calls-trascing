@@ -66,7 +66,8 @@ $now   = date('Y-m-d H:i:s');
 
 $callsToday   = (int)R::getCell('SELECT COUNT(*) FROM calls WHERE DATE(created_at) = ?', [$today]);
 $matchedToday = (int)R::getCell('SELECT COUNT(*) FROM calls WHERE DATE(created_at) = ? AND session_id IS NOT NULL', [$today]);
-$goalsSent    = (int)R::getCell('SELECT COUNT(*) FROM calls WHERE DATE(created_at) = ? AND goal_sent = 1', [$today]);
+$goalsSent      = (int)R::getCell('SELECT COUNT(*) FROM calls WHERE DATE(created_at) = ? AND goal_sent = 1', [$today]);
+$goalsDuplicate = (int)R::getCell('SELECT COUNT(*) FROM calls WHERE DATE(created_at) = ? AND goal_sent = 2', [$today]);
 $totalPhones  = (int)R::getCell('SELECT COUNT(*) FROM phonepool WHERE is_active = 1');
 $busyPhones   = (int)R::getCell(
     'SELECT COUNT(DISTINCT phonepool_id) FROM sessions WHERE phonepool_id IS NOT NULL AND expires_at > ?',
@@ -173,6 +174,9 @@ $goalsFailedToday    = (int)R::getCell(
 );
 $goalsNoSessionToday = (int)R::getCell(
     'SELECT COUNT(*) FROM calls WHERE DATE(created_at) = ? AND goal_sent = 0 AND session_id IS NULL', [$today]
+);
+$goalsDuplicateToday = (int)R::getCell(
+    'SELECT COUNT(*) FROM calls WHERE DATE(created_at) = ? AND goal_sent = 2', [$today]
 );
 $failedCalls = R::getAll(
     "SELECT c.id, c.caller, c.call_time, c.created_at, s.client_id, s.utm_source
@@ -427,6 +431,7 @@ function buildUrl($extra = []) {
 
   .goal-yes { color: #22c55e; font-size: 14px; }
   .goal-no  { color: #cbd5e1; font-size: 14px; }
+  .goal-dup { color: #f59e0b; font-size: 14px; }
 
   .cid-tag {
     font-family: monospace;
@@ -663,8 +668,10 @@ function buildUrl($extra = []) {
                 <?php else: ?><span class="badge badge-off">—</span><?php endif ?>
               </td>
               <td>
-                <?php if ($lc['goal_sent']): ?>
+                <?php if ($lc['goal_sent'] == 1): ?>
                   <i class="bi bi-check-circle-fill goal-yes" title="Цель отправлена"></i>
+                <?php elseif ($lc['goal_sent'] == 2): ?>
+                  <i class="bi bi-skip-forward-circle-fill goal-dup" title="Дубль — не отправлено"></i>
                 <?php else: ?>
                   <i class="bi bi-dash-circle goal-no"></i>
                 <?php endif ?>
@@ -796,8 +803,10 @@ function buildUrl($extra = []) {
             </td>
             <td style="color:#475569;"><?= esc(fmtDur($c['talk_duration'])) ?></td>
             <td>
-              <?php if ($c['goal_sent']): ?>
+              <?php if ($c['goal_sent'] == 1): ?>
                 <i class="bi bi-check-circle-fill goal-yes" title="Цель отправлена в Метрику"></i>
+              <?php elseif ($c['goal_sent'] == 2): ?>
+                <i class="bi bi-skip-forward-circle-fill goal-dup" title="Дубль — клиент уже звонил, цель не отправлена"></i>
               <?php else: ?>
                 <i class="bi bi-dash-circle goal-no" title="Цель не отправлена"></i>
               <?php endif ?>
@@ -976,6 +985,14 @@ function buildUrl($extra = []) {
         <div class="stat-val" style="<?= $goalsFailedToday > 0 ? 'color:#ef4444' : '' ?>"><?= $goalsFailedToday ?></div>
         <div class="stat-label">Ошибок отправки</div>
         <div class="stat-sub">сессия есть, цель не ушла</div>
+      </div>
+    </div>
+    <div class="col-6 col-lg-3">
+      <div class="stat-card">
+        <div class="stat-icon" style="background:#fef3c7;color:#d97706"><i class="bi bi-skip-forward-circle"></i></div>
+        <div class="stat-val" style="color:#d97706"><?= $goalsDuplicateToday ?></div>
+        <div class="stat-label">Дублей пропущено</div>
+        <div class="stat-sub">клиент уже звонил</div>
       </div>
     </div>
     <div class="col-6 col-lg-3">
