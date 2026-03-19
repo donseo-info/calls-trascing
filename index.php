@@ -67,6 +67,9 @@ $virtualPhoneClean = preg_replace('/\D/', '', $virtualPhone);
 R::setup('sqlite:' . DB_PATH);
 R::freeze(true);
 
+// Миграция: добавляем sent_client_id если ещё нет
+try { R::exec('ALTER TABLE calls ADD COLUMN sent_client_id TEXT'); } catch (Exception $e) {}
+
 $now = date('Y-m-d H:i:s');
 
 // Ищем активную сессию с этим подменным номером
@@ -153,7 +156,7 @@ if ($hasIdentifier && METRIKA_ACCESS_TOKEN && METRIKA_COUNTER_ID) {
         );
 
         if (!empty($result['success'])) {
-            R::exec('UPDATE calls SET goal_sent = 1 WHERE id = ?', [$callId]);
+            R::exec('UPDATE calls SET goal_sent = 1, sent_client_id = ? WHERE id = ?', [$clientId ?: null, $callId]);
         }
 
         $metrikaLog = $ts . ' METRIKA: success=' . ($result['success'] ? 'true' : 'false')
