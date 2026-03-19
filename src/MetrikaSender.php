@@ -8,17 +8,11 @@
 class MetrikaSender
 {
     private $accessToken;
-    private $csvDir;
     private $apiUrl = 'https://api-metrica.yandex.net/management/v1/counter/{counterId}/offline_conversions/upload';
 
-    public function __construct($accessToken, $csvDir = null)
+    public function __construct($accessToken)
     {
         $this->accessToken = $accessToken;
-        $this->csvDir = $csvDir ?: __DIR__ . '/../logs/csv_files';
-
-        if (!is_dir($this->csvDir)) {
-            mkdir($this->csvDir, 0755, true);
-        }
     }
 
     /**
@@ -27,9 +21,9 @@ class MetrikaSender
      * @param string $counterId  ID счётчика Метрики
      * @param string $goalName   Название цели
      * @param int    $timestamp  Unix timestamp события
-     * @param string $clientId   ClientID Метрики (из cookie _ym_uid)
-     * @param string $phone      Телефон звонящего (нормализованный, только цифры)
-     * @return array ['success', 'http_code', 'response', 'error']
+     * @param string $clientId   ClientID Метрики (_ym_uid)
+     * @param string $phone      Телефон звонящего
+     * @return array ['success', 'http_code', 'response', 'error', 'csv']
      */
     public function send($counterId, $goalName, $timestamp, $clientId = null, $phone = null)
     {
@@ -41,7 +35,7 @@ class MetrikaSender
             return ['success' => false, 'error' => 'no identifier (client_id or phone)'];
         }
 
-        // Строим CSV
+        // Строим CSV в памяти
         $headers = [];
         $values  = [];
 
@@ -63,19 +57,19 @@ class MetrikaSender
         $csv = implode(',', $headers) . "\n"
              . implode(',', $values)  . "\n";
 
-        // Сохраняем CSV файл
-        $filename = $this->csvDir . '/conv_' . date('Y-m-d_H-i-s') . '_' . uniqid() . '.csv';
-        file_put_contents($filename, $csv);
+        // Пишем CSV во временный файл и отправляем через CURLFile
+        $tmp = tmpfile();
+        fwrite($tmp, $csv);
+        $tmpPath = stream_get_meta_data($tmp)['uri'];
 
-        // Отправляем через CURL
-        $url  = str_replace('{counterId}', $counterId, $this->apiUrl);
-        $ch   = curl_init();
+        $url = str_replace('{counterId}', $counterId, $this->apiUrl);
+        $ch  = curl_init();
 
         curl_setopt_array($ch, [
             CURLOPT_URL            => $url,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST           => true,
-            CURLOPT_POSTFIELDS     => ['file' => new CURLFile($filename, 'text/csv', 'conversions.csv')],
+            CURLOPT_POSTFIELDS     => ['file' => new CURLFile($tmpPath, 'text/csv', 'conversions.csv')],
             CURLOPT_HTTPHEADER     => ['Authorization: OAuth ' . $this->accessToken],
             CURLOPT_TIMEOUT        => 10,
         ]);
@@ -85,8 +79,10 @@ class MetrikaSender
         $curlError = curl_error($ch);
         curl_close($ch);
 
+        fclose($tmp); // удаляем временный файл
+
         if ($curlError) {
-            return ['success' => false, 'error' => $curlError, 'http_code' => $httpCode];
+            return ['success' => false, 'error' => $curlError, 'http_code' => $httpCode, 'csv' => $csv];
         }
 
         return [

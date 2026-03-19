@@ -141,7 +141,9 @@ if ($hasIdentifier && METRIKA_ACCESS_TOKEN && METRIKA_COUNTER_ID) {
 
     $metrikaLog = $ts . ' METRIKA: success=' . ($result['success'] ? 'true' : 'false')
                 . ' http=' . ($result['http_code'] ?? '?')
-                . ' error=' . ($result['error'] ?? 'none') . PHP_EOL;
+                . ' error=' . ($result['error'] ?? 'none')
+                . ' csv=[' . trim($result['csv'] ?? '') . ']'
+                . ' response=' . ($result['raw_response'] ?? 'none') . PHP_EOL;
     file_put_contents(LOG_FILE, $metrikaLog, FILE_APPEND | LOCK_EX);
 } else {
     $metrikaLog = $ts . ' METRIKA: skipped (no identifier or token not set)' . PHP_EOL;

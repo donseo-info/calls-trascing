@@ -10,7 +10,7 @@ define('SESSION_TTL_MINUTES', 10);
 define('METRIKA_GOAL_ID', 'send_lead');
 
 // ID счётчика Яндекс.Метрики
-define('METRIKA_COUNTER_ID', '107404488');
+define('METRIKA_COUNTER_ID', '108141615');
 
 // Статичный номер-заглушка когда пул исчерпан (без трекинга)
 define('FALLBACK_PHONE', '+79884007097');
