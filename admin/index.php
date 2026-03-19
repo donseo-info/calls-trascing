@@ -191,7 +191,7 @@ R::close();
 
 // Читаем лог — последние строки с METRIKA
 $metrikaLog = [];
-$logFile = dirname(__DIR__) . '/calls.txt';
+$logFile = dirname(__DIR__) . '/logs/calls.txt';
 if (file_exists($logFile)) {
     $lines = file($logFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
     foreach (array_reverse($lines) as $line) {

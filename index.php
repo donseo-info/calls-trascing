@@ -4,7 +4,7 @@ require_once __DIR__ . '/rb.php';
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/src/MetrikaSender.php';
 
-define('LOG_FILE', __DIR__ . '/calls.txt');
+define('LOG_FILE', __DIR__ . '/logs/calls.txt');
 
 // ── 1. Парсим raw query string ────────────────────────────────────
 // Исправляем баг Novofon: пропущен & между communication_number и employee_full_name
