@@ -671,7 +671,7 @@ function buildUrl($extra = []) {
                 <?php if ($lc['goal_sent'] == 1): ?>
                   <i class="bi bi-check-circle-fill goal-yes" title="Цель отправлена"></i>
                 <?php elseif ($lc['goal_sent'] == 2): ?>
-                  <i class="bi bi-skip-forward-circle-fill goal-dup" title="Дубль — не отправлено"></i>
+                  <i class="bi bi-arrow-repeat goal-dup" title="Дубль — не отправлено"></i>
                 <?php else: ?>
                   <i class="bi bi-dash-circle goal-no"></i>
                 <?php endif ?>
@@ -806,7 +806,7 @@ function buildUrl($extra = []) {
               <?php if ($c['goal_sent'] == 1): ?>
                 <i class="bi bi-check-circle-fill goal-yes" title="Цель отправлена в Метрику"></i>
               <?php elseif ($c['goal_sent'] == 2): ?>
-                <i class="bi bi-skip-forward-circle-fill goal-dup" title="Дубль — клиент уже звонил, цель не отправлена"></i>
+                <i class="bi bi-arrow-repeat goal-dup" title="Дубль — клиент уже звонил, цель не отправлена"></i>
               <?php else: ?>
                 <i class="bi bi-dash-circle goal-no" title="Цель не отправлена"></i>
               <?php endif ?>
@@ -989,7 +989,7 @@ function buildUrl($extra = []) {
     </div>
     <div class="col-6 col-lg-3">
       <div class="stat-card">
-        <div class="stat-icon" style="background:#fef3c7;color:#d97706"><i class="bi bi-skip-forward-circle"></i></div>
+        <div class="stat-icon" style="background:#fef3c7;color:#d97706"><i class="bi bi-arrow-repeat"></i></div>
         <div class="stat-val" style="color:#d97706"><?= $goalsDuplicateToday ?></div>
         <div class="stat-label">Дублей пропущено</div>
         <div class="stat-sub">клиент уже звонил</div>

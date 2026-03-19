@@ -124,20 +124,19 @@ $hasIdentifier = !empty($clientId) || !empty($callerNumber);
 
 if ($hasIdentifier && METRIKA_ACCESS_TOKEN && METRIKA_COUNTER_ID) {
 
-    // Проверяем дубль: уже отправляли цель для этого clientId?
+    // Проверяем дубль по client_id
     $isDuplicate = false;
+
     if ($clientId) {
-        $alreadySent = (int)R::getCell(
+        $isDuplicate = (int)R::getCell(
             "SELECT COUNT(*) FROM calls c
              JOIN sessions s ON s.id = c.session_id
              WHERE s.client_id = ? AND c.goal_sent = 1 AND c.id != ?",
             [$clientId, $callId]
-        );
-        $isDuplicate = $alreadySent > 0;
+        ) > 0;
     }
 
     if ($isDuplicate) {
-        // Дубль — помечаем goal_sent=2, в Метрику не отправляем
         R::exec('UPDATE calls SET goal_sent = 2 WHERE id = ?', [$callId]);
         $metrikaLog = $ts . ' METRIKA: duplicate client_id=' . $clientId . ' goal not sent' . PHP_EOL;
         file_put_contents(LOG_FILE, $metrikaLog, FILE_APPEND | LOCK_EX);
