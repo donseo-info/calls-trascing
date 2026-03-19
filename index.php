@@ -123,28 +123,47 @@ file_put_contents(LOG_FILE, $matchLog, FILE_APPEND | LOCK_EX);
 $hasIdentifier = !empty($clientId) || !empty($callerNumber);
 
 if ($hasIdentifier && METRIKA_ACCESS_TOKEN && METRIKA_COUNTER_ID) {
-    $metrika   = new MetrikaSender(METRIKA_ACCESS_TOKEN);
-    $timestamp = strtotime($callTime) ?: time();
 
-    $result = $metrika->send(
-        METRIKA_COUNTER_ID,
-        METRIKA_GOAL_ID,
-        $timestamp,
-        $clientId    ?: null,
-        $callerNumber ?: null
-    );
-
-    // Помечаем звонок как отправленный если успех
-    if (!empty($result['success'])) {
-        R::exec('UPDATE calls SET goal_sent = 1 WHERE id = ?', [$callId]);
+    // Проверяем дубль: уже отправляли цель для этого clientId?
+    $isDuplicate = false;
+    if ($clientId) {
+        $alreadySent = (int)R::getCell(
+            "SELECT COUNT(*) FROM calls c
+             JOIN sessions s ON s.id = c.session_id
+             WHERE s.client_id = ? AND c.goal_sent = 1 AND c.id != ?",
+            [$clientId, $callId]
+        );
+        $isDuplicate = $alreadySent > 0;
     }
 
-    $metrikaLog = $ts . ' METRIKA: success=' . ($result['success'] ? 'true' : 'false')
-                . ' http=' . ($result['http_code'] ?? '?')
-                . ' error=' . ($result['error'] ?? 'none')
-                . ' csv=[' . trim($result['csv'] ?? '') . ']'
-                . ' response=' . ($result['raw_response'] ?? 'none') . PHP_EOL;
-    file_put_contents(LOG_FILE, $metrikaLog, FILE_APPEND | LOCK_EX);
+    if ($isDuplicate) {
+        // Дубль — помечаем goal_sent=2, в Метрику не отправляем
+        R::exec('UPDATE calls SET goal_sent = 2 WHERE id = ?', [$callId]);
+        $metrikaLog = $ts . ' METRIKA: duplicate client_id=' . $clientId . ' goal not sent' . PHP_EOL;
+        file_put_contents(LOG_FILE, $metrikaLog, FILE_APPEND | LOCK_EX);
+    } else {
+        $metrika   = new MetrikaSender(METRIKA_ACCESS_TOKEN);
+        $timestamp = strtotime($callTime) ?: time();
+
+        $result = $metrika->send(
+            METRIKA_COUNTER_ID,
+            METRIKA_GOAL_ID,
+            $timestamp,
+            $clientId    ?: null,
+            $callerNumber ?: null
+        );
+
+        if (!empty($result['success'])) {
+            R::exec('UPDATE calls SET goal_sent = 1 WHERE id = ?', [$callId]);
+        }
+
+        $metrikaLog = $ts . ' METRIKA: success=' . ($result['success'] ? 'true' : 'false')
+                    . ' http=' . ($result['http_code'] ?? '?')
+                    . ' error=' . ($result['error'] ?? 'none')
+                    . ' csv=[' . trim($result['csv'] ?? '') . ']'
+                    . ' response=' . ($result['raw_response'] ?? 'none') . PHP_EOL;
+        file_put_contents(LOG_FILE, $metrikaLog, FILE_APPEND | LOCK_EX);
+    }
 } else {
     $metrikaLog = $ts . ' METRIKA: skipped (no identifier or token not set)' . PHP_EOL;
     file_put_contents(LOG_FILE, $metrikaLog, FILE_APPEND | LOCK_EX);
