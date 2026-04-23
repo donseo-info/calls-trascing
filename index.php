@@ -97,6 +97,13 @@ if (!$session) {
 $sessionId = $session ? (int)$session['id'] : null;
 $clientId  = $session ? $session['client_id'] : null;
 
+// Извлекаем yclid из landing_page если нет client_id
+$yclid = null;
+if (!$clientId && !empty($session['landing_page'])) {
+    parse_str(parse_url($session['landing_page'], PHP_URL_QUERY) ?? '', $lpParams);
+    $yclid = !empty($lpParams['yclid']) ? $lpParams['yclid'] : null;
+}
+
 // ── 5. Сохраняем звонок в БД ──────────────────────────────────────
 $call = R::dispense('calls');
 $call->session_id      = $sessionId;
@@ -118,12 +125,13 @@ $callId = R::store($call);
 // Логируем результат матчинга
 $matchLog = $ts . ' MATCH:   session_id=' . ($sessionId ?? 'null')
           . ' client_id=' . ($clientId ?? 'null')
+          . ' yclid=' . ($yclid ?? 'null')
           . ' call_id=' . $callId . PHP_EOL;
 file_put_contents(LOG_FILE, $matchLog, FILE_APPEND | LOCK_EX);
 
 // ── 6. Отправляем офлайн конверсию в Метрику ─────────────────────
 // Отправляем только если есть хотя бы один идентификатор
-$hasIdentifier = !empty($clientId) || !empty($callerNumber);
+$hasIdentifier = !empty($clientId) || !empty($yclid) || !empty($callerNumber);
 
 if ($hasIdentifier && METRIKA_ACCESS_TOKEN && METRIKA_COUNTER_ID) {
 
@@ -151,7 +159,8 @@ if ($hasIdentifier && METRIKA_ACCESS_TOKEN && METRIKA_COUNTER_ID) {
             METRIKA_COUNTER_ID,
             METRIKA_GOAL_ID,
             $timestamp,
-            $clientId    ?: null,
+            $clientId     ?: null,
+            $yclid        ?: null,
             $callerNumber ?: null
         );
 

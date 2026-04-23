@@ -2,7 +2,8 @@
 /**
  * MetrikaSender — отправка офлайн конверсий в Яндекс Метрику
  *
- * Формат CSV: ClientId,phones,Target,DateTime
+ * Формат CSV: ClientId,Yclid,phones,Target,DateTime
+ * Приоритет идентификатора: ClientId → Yclid → phones
  * API: POST https://api-metrica.yandex.net/management/v1/counter/{id}/offline_conversions/upload
  */
 class MetrikaSender
@@ -25,23 +26,26 @@ class MetrikaSender
      * @param string $phone      Телефон звонящего
      * @return array ['success', 'http_code', 'response', 'error', 'csv']
      */
-    public function send($counterId, $goalName, $timestamp, $clientId = null, $phone = null)
+    public function send($counterId, $goalName, $timestamp, $clientId = null, $yclid = null, $phone = null)
     {
         if (!$this->accessToken) {
             return ['success' => false, 'error' => 'access_token not set'];
         }
 
-        if (!$clientId && !$phone) {
-            return ['success' => false, 'error' => 'no identifier (client_id or phone)'];
+        if (!$clientId && !$yclid && !$phone) {
+            return ['success' => false, 'error' => 'no identifier (client_id, yclid or phone)'];
         }
 
-        // Строим CSV в памяти
+        // Строим CSV в памяти. Приоритет: ClientId → Yclid → phones
         $headers = [];
         $values  = [];
 
         if ($clientId) {
             $headers[] = 'ClientId';
             $values[]  = $clientId;
+        } elseif ($yclid) {
+            $headers[] = 'Yclid';
+            $values[]  = $yclid;
         }
 
         if ($phone) {

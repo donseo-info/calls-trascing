@@ -1,0 +1,12 @@
+# Database
+db/*.db
+db/*.db-shm
+db/*.db-wal
+
+# Logs
+logs/calls.txt
+logs/csv_files/
+
+# System
+.DS_Store
+._*
