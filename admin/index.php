@@ -1,6 +1,7 @@
 <?php
 require_once dirname(__DIR__) . '/rb.php';
 require_once dirname(__DIR__) . '/config.php';
+require_once dirname(__DIR__) . '/src/MetrikaSender.php';
 
 R::setup('sqlite:' . DB_PATH);
 R::freeze(true);
@@ -53,6 +54,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             echo json_encode(['success' => false]);
         }
+        R::close(); exit;
+    }
+
+    if ($action === 'resend_metrika') {
+        $callId    = (int)($_POST['call_id']  ?? 0);
+        $clientId  = trim($_POST['client_id'] ?? '') ?: null;
+        $yclid     = trim($_POST['yclid']     ?? '') ?: null;
+        $phone     = trim($_POST['phone']     ?? '') ?: null;
+        $goal      = trim($_POST['goal']      ?? '') ?: METRIKA_GOAL_ID;
+        $datetime  = trim($_POST['datetime']  ?? '');
+        $timestamp = $datetime ? strtotime($datetime) : time();
+
+        if (!$callId) {
+            echo json_encode(['success' => false, 'error' => 'no call_id']);
+            R::close(); exit;
+        }
+        if (!$clientId && !$yclid && !$phone) {
+            echo json_encode(['success' => false, 'error' => 'Нужен хотя бы один идентификатор']);
+            R::close(); exit;
+        }
+
+        $metrika = new MetrikaSender(METRIKA_ACCESS_TOKEN);
+        $result  = $metrika->send(METRIKA_COUNTER_ID, $goal, $timestamp, $clientId, $yclid, $phone);
+
+        if (!empty($result['success'])) {
+            R::exec('UPDATE calls SET goal_sent = 1, sent_client_id = ? WHERE id = ?', [$clientId, $callId]);
+        }
+
+        echo json_encode([
+            'success'   => !empty($result['success']),
+            'http_code' => $result['http_code']    ?? null,
+            'error'     => $result['error']         ?? null,
+            'csv'       => $result['csv']            ?? null,
+            'response'  => $result['raw_response']  ?? null,
+        ]);
         R::close(); exit;
     }
 
@@ -122,8 +158,9 @@ $totalPages = max(1, (int)ceil($totalRows / $perPage));
 
 $calls = R::getAll(
     "SELECT c.id, c.caller, c.called, c.direction, c.call_time, c.talk_duration,
-            c.goal_sent, c.created_at, c.session_id,
-            s.client_id, s.utm_source, s.phone as session_phone, s.landing_page
+            c.goal_sent, c.created_at, c.session_id, c.sent_client_id,
+            s.client_id, s.utm_source, s.utm_medium, s.utm_campaign, s.utm_term, s.utm_content,
+            s.phone as session_phone, s.landing_page
      FROM calls c
      LEFT JOIN sessions s ON s.id = c.session_id
      $whereSql
@@ -179,7 +216,9 @@ $goalsDuplicateToday = (int)R::getCell(
     'SELECT COUNT(*) FROM calls WHERE DATE(created_at) = ? AND goal_sent = 2', [$today]
 );
 $failedCalls = R::getAll(
-    "SELECT c.id, c.caller, c.call_time, c.created_at, s.client_id, s.utm_source
+    "SELECT c.id, c.caller, c.call_time, c.created_at,
+            s.client_id, s.utm_source, s.utm_medium, s.utm_campaign, s.utm_term, s.utm_content,
+            s.landing_page
      FROM calls c
      LEFT JOIN sessions s ON s.id = c.session_id
      WHERE c.goal_sent = 0 AND c.session_id IS NOT NULL
@@ -499,6 +538,19 @@ function buildUrl($extra = []) {
     position: fixed; bottom: 24px; right: 24px; z-index: 9999;
     min-width: 220px;
   }
+
+  .btn-resend {
+    background: none;
+    border: 1px solid #bfdbfe;
+    border-radius: 6px;
+    color: #3b82f6;
+    padding: 2px 6px;
+    font-size: 12px;
+    cursor: pointer;
+    line-height: 1.4;
+    transition: background .15s, color .15s;
+  }
+  .btn-resend:hover { background: #eff6ff; color: #1d4ed8; border-color: #93c5fd; }
 </style>
 </head>
 <body>
@@ -751,6 +803,13 @@ function buildUrl($extra = []) {
         <tbody>
           <?php if ($calls): foreach ($calls as $c):
             $callDt = $c['call_time'] ? date('d.m.Y H:i:s', strtotime($c['call_time'])) : esc($c['created_at']);
+            $callDtInput = $c['call_time'] ? date('Y-m-d\TH:i', strtotime($c['call_time'])) : date('Y-m-d\TH:i');
+            // Извлекаем yclid из landing_page
+            $cYclid = '';
+            if (!empty($c['landing_page'])) {
+                parse_str(parse_url($c['landing_page'], PHP_URL_QUERY) ?? '', $lpq);
+                $cYclid = $lpq['yclid'] ?? '';
+            }
           ?>
           <tr>
             <td style="color:#cbd5e1;font-size:11px;"><?= (int)$c['id'] ?></td>
@@ -803,13 +862,31 @@ function buildUrl($extra = []) {
             </td>
             <td style="color:#475569;"><?= esc(fmtDur($c['talk_duration'])) ?></td>
             <td>
-              <?php if ($c['goal_sent'] == 1): ?>
-                <i class="bi bi-check-circle-fill goal-yes" title="Цель отправлена в Метрику"></i>
-              <?php elseif ($c['goal_sent'] == 2): ?>
-                <i class="bi bi-arrow-repeat goal-dup" title="Дубль — клиент уже звонил, цель не отправлена"></i>
-              <?php else: ?>
-                <i class="bi bi-dash-circle goal-no" title="Цель не отправлена"></i>
-              <?php endif ?>
+              <div class="d-flex align-items-center gap-1">
+                <?php if ($c['goal_sent'] == 1): ?>
+                  <i class="bi bi-check-circle-fill goal-yes" title="Цель отправлена в Метрику"></i>
+                <?php elseif ($c['goal_sent'] == 2): ?>
+                  <i class="bi bi-arrow-repeat goal-dup" title="Дубль — клиент уже звонил, цель не отправлена"></i>
+                <?php else: ?>
+                  <i class="bi bi-dash-circle goal-no" title="Цель не отправлена"></i>
+                <?php endif ?>
+                <button class="btn-resend"
+                  title="Переотправить в Метрику"
+                  data-call-id="<?= (int)$c['id'] ?>"
+                  data-client-id="<?= esc($c['client_id'] ?? '') ?>"
+                  data-yclid="<?= esc($cYclid) ?>"
+                  data-phone="<?= esc(preg_replace('/\D/', '', $c['caller'] ?? '')) ?>"
+                  data-goal="<?= esc(METRIKA_GOAL_ID) ?>"
+                  data-datetime="<?= esc($callDtInput) ?>"
+                  data-landing="<?= esc($c['landing_page'] ?? '') ?>"
+                  data-utm-source="<?= esc($c['utm_source'] ?? '') ?>"
+                  data-utm-medium="<?= esc($c['utm_medium'] ?? '') ?>"
+                  data-utm-campaign="<?= esc($c['utm_campaign'] ?? '') ?>"
+                  data-utm-term="<?= esc($c['utm_term'] ?? '') ?>"
+                  data-utm-content="<?= esc($c['utm_content'] ?? '') ?>">
+                  <i class="bi bi-send"></i>
+                </button>
+              </div>
             </td>
           </tr>
           <?php endforeach; else: ?>
@@ -1026,11 +1103,17 @@ function buildUrl($extra = []) {
         <div class="table-responsive">
           <table class="ct-table table table-borderless">
             <thead>
-              <tr><th>#</th><th>Время</th><th>Звонящий</th><th>ClientID</th><th>UTM</th></tr>
+              <tr><th>#</th><th>Время</th><th>Звонящий</th><th>ClientID</th><th>UTM</th><th></th></tr>
             </thead>
             <tbody>
               <?php foreach ($failedCalls as $fc):
                 $dt = $fc['call_time'] ? date('d.m H:i', strtotime($fc['call_time'])) : date('d.m H:i', strtotime($fc['created_at']));
+                $fcDtInput = $fc['call_time'] ? date('Y-m-d\TH:i', strtotime($fc['call_time'])) : date('Y-m-d\TH:i');
+                $fcYclid = '';
+                if (!empty($fc['landing_page'])) {
+                    parse_str(parse_url($fc['landing_page'], PHP_URL_QUERY) ?? '', $fcLpq);
+                    $fcYclid = $fcLpq['yclid'] ?? '';
+                }
               ?>
               <tr>
                 <td style="color:#cbd5e1;font-size:11px;"><?= (int)$fc['id'] ?></td>
@@ -1051,6 +1134,24 @@ function buildUrl($extra = []) {
                   <?php else: ?>
                     <span style="color:#cbd5e1;font-size:11px;">—</span>
                   <?php endif ?>
+                </td>
+                <td>
+                  <button class="btn-resend"
+                    title="Переотправить в Метрику"
+                    data-call-id="<?= (int)$fc['id'] ?>"
+                    data-client-id="<?= esc($fc['client_id'] ?? '') ?>"
+                    data-yclid="<?= esc($fcYclid) ?>"
+                    data-phone="<?= esc(preg_replace('/\D/', '', $fc['caller'] ?? '')) ?>"
+                    data-goal="<?= esc(METRIKA_GOAL_ID) ?>"
+                    data-datetime="<?= esc($fcDtInput) ?>"
+                    data-landing="<?= esc($fc['landing_page'] ?? '') ?>"
+                    data-utm-source="<?= esc($fc['utm_source'] ?? '') ?>"
+                    data-utm-medium="<?= esc($fc['utm_medium'] ?? '') ?>"
+                    data-utm-campaign="<?= esc($fc['utm_campaign'] ?? '') ?>"
+                    data-utm-term="<?= esc($fc['utm_term'] ?? '') ?>"
+                    data-utm-content="<?= esc($fc['utm_content'] ?? '') ?>">
+                    <i class="bi bi-send"></i>
+                  </button>
                 </td>
               </tr>
               <?php endforeach ?>
@@ -1202,6 +1303,88 @@ function buildUrl($extra = []) {
 <?php endif ?>
 </div><!-- /container -->
 
+<!-- Модал: переотправка в Метрику -->
+<div class="modal fade" id="resendModal" tabindex="-1" aria-labelledby="resendModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content" style="border:1px solid #dbeafe;border-radius:12px;">
+      <div class="modal-header" style="background:#e0f2fe;border-bottom:1px solid #bfdbfe;">
+        <h5 class="modal-title" id="resendModalLabel" style="font-size:14px;font-weight:700;color:#1e3a8a;">
+          <i class="bi bi-send me-2"></i>Переотправить в Яндекс.Метрику
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" style="background:#f8fbff;">
+        <div class="mb-3 p-2 rounded" style="background:#eff6ff;font-size:11px;color:#1d4ed8;border:1px solid #bfdbfe;">
+          <strong>Приоритет:</strong> ClientId → Yclid → Phone. Пустые поля игнорируются. Хотя бы один идентификатор обязателен.
+        </div>
+
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label fw-semibold" style="font-size:12px;">ClientID <span style="color:#94a3b8;font-weight:400;">(_ym_uid)</span></label>
+            <input type="text" id="rm-client-id" class="form-control form-control-sm" placeholder="оставьте пустым чтобы не использовать" style="font-family:monospace;font-size:12px;">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold" style="font-size:12px;">Yclid <span style="color:#94a3b8;font-weight:400;">(из URL)</span></label>
+            <input type="text" id="rm-yclid" class="form-control form-control-sm" placeholder="оставьте пустым чтобы не использовать" style="font-family:monospace;font-size:12px;">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold" style="font-size:12px;">Phone <span style="color:#94a3b8;font-weight:400;">(звонящий)</span></label>
+            <input type="text" id="rm-phone" class="form-control form-control-sm" placeholder="79001234567" style="font-family:monospace;font-size:12px;">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold" style="font-size:12px;">Цель <span style="color:#94a3b8;font-weight:400;">(goal name)</span></label>
+            <input type="text" id="rm-goal" class="form-control form-control-sm" style="font-family:monospace;font-size:12px;">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold" style="font-size:12px;">Дата и время звонка</label>
+            <input type="datetime-local" id="rm-datetime" class="form-control form-control-sm" style="font-size:12px;">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold" style="font-size:12px;">Landing Page</label>
+            <input type="text" id="rm-landing" class="form-control form-control-sm" readonly style="font-size:11px;color:#64748b;background:#f1f5f9;">
+          </div>
+        </div>
+
+        <!-- UTM -->
+        <div class="mt-3 p-2 rounded" style="background:#fff;border:1px solid #dbeafe;">
+          <div style="font-size:11px;font-weight:600;color:#475569;margin-bottom:8px;">UTM-метки (только для справки)</div>
+          <div class="row g-2">
+            <div class="col">
+              <label style="font-size:10px;color:#94a3b8;">source</label>
+              <input type="text" id="rm-utm-source" class="form-control form-control-sm" readonly style="font-size:11px;background:#f8fbff;">
+            </div>
+            <div class="col">
+              <label style="font-size:10px;color:#94a3b8;">medium</label>
+              <input type="text" id="rm-utm-medium" class="form-control form-control-sm" readonly style="font-size:11px;background:#f8fbff;">
+            </div>
+            <div class="col">
+              <label style="font-size:10px;color:#94a3b8;">campaign</label>
+              <input type="text" id="rm-utm-campaign" class="form-control form-control-sm" readonly style="font-size:11px;background:#f8fbff;">
+            </div>
+            <div class="col">
+              <label style="font-size:10px;color:#94a3b8;">term</label>
+              <input type="text" id="rm-utm-term" class="form-control form-control-sm" readonly style="font-size:11px;background:#f8fbff;">
+            </div>
+            <div class="col">
+              <label style="font-size:10px;color:#94a3b8;">content</label>
+              <input type="text" id="rm-utm-content" class="form-control form-control-sm" readonly style="font-size:11px;background:#f8fbff;">
+            </div>
+          </div>
+        </div>
+
+        <!-- Результат -->
+        <div id="rm-result" class="mt-3" style="display:none;"></div>
+      </div>
+      <div class="modal-footer" style="background:#f8fbff;border-top:1px solid #dbeafe;">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Отмена</button>
+        <button type="button" id="rm-submit" class="btn btn-primary btn-sm">
+          <i class="bi bi-send me-1"></i>Отправить в Метрику
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Toast -->
 <div class="toast-ct">
   <div id="ct-toast" class="toast align-items-center border-0" role="alert" aria-live="assertive">
@@ -1279,6 +1462,72 @@ document.querySelectorAll('.phone-delete').forEach(function(btn) {
         }
       });
   });
+});
+
+// Переотправка в Метрику
+var resendModal = new bootstrap.Modal(document.getElementById('resendModal'));
+var rmCallId = null;
+
+document.addEventListener('click', function(e) {
+  var btn = e.target.closest('.btn-resend');
+  if (!btn) return;
+  rmCallId = btn.dataset.callId;
+  document.getElementById('rm-client-id').value   = btn.dataset.clientId   || '';
+  document.getElementById('rm-yclid').value        = btn.dataset.yclid       || '';
+  document.getElementById('rm-phone').value        = btn.dataset.phone       || '';
+  document.getElementById('rm-goal').value         = btn.dataset.goal        || '';
+  document.getElementById('rm-datetime').value     = btn.dataset.datetime    || '';
+  document.getElementById('rm-landing').value      = btn.dataset.landing     || '';
+  document.getElementById('rm-utm-source').value   = btn.dataset.utmSource   || '';
+  document.getElementById('rm-utm-medium').value   = btn.dataset.utmMedium   || '';
+  document.getElementById('rm-utm-campaign').value = btn.dataset.utmCampaign || '';
+  document.getElementById('rm-utm-term').value     = btn.dataset.utmTerm     || '';
+  document.getElementById('rm-utm-content').value  = btn.dataset.utmContent  || '';
+  document.getElementById('rm-result').style.display = 'none';
+  resendModal.show();
+});
+
+document.getElementById('rm-submit').addEventListener('click', function() {
+  if (!rmCallId) return;
+  var btn = this;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Отправка…';
+
+  var fd = new FormData();
+  fd.append('action',    'resend_metrika');
+  fd.append('call_id',   rmCallId);
+  fd.append('client_id', document.getElementById('rm-client-id').value.trim());
+  fd.append('yclid',     document.getElementById('rm-yclid').value.trim());
+  fd.append('phone',     document.getElementById('rm-phone').value.trim());
+  fd.append('goal',      document.getElementById('rm-goal').value.trim());
+  fd.append('datetime',  document.getElementById('rm-datetime').value);
+
+  fetch(window.location.pathname, { method: 'POST', body: fd })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-send me-1"></i>Отправить в Метрику';
+      var res = document.getElementById('rm-result');
+      res.style.display = 'block';
+      if (data.success) {
+        res.innerHTML = '<div class="alert alert-success py-2 mb-0" style="font-size:12px;">' +
+          '<i class="bi bi-check-circle-fill me-1"></i>Успешно! HTTP ' + data.http_code +
+          '<br><code style="font-size:10px;">' + (data.csv || '').replace(/\n/g,'<br>') + '</code></div>';
+        showToast('Цель отправлена', true);
+      } else {
+        res.innerHTML = '<div class="alert alert-danger py-2 mb-0" style="font-size:12px;">' +
+          '<i class="bi bi-x-circle-fill me-1"></i>Ошибка: ' + (data.error || 'неизвестная') +
+          (data.http_code ? ' (HTTP ' + data.http_code + ')' : '') +
+          (data.response ? '<br><code style="font-size:10px;">' + data.response + '</code>' : '') +
+          '</div>';
+        showToast('Ошибка отправки', false);
+      }
+    })
+    .catch(function() {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-send me-1"></i>Отправить в Метрику';
+      showToast('Ошибка сети', false);
+    });
 });
 
 // Добавление номера
