@@ -1,5 +1,4 @@
-# Database
-db/*.db
+# Database WAL temp files
 db/*.db-shm
 db/*.db-wal
 
