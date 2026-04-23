@@ -6,6 +6,9 @@ require_once dirname(__DIR__) . '/src/MetrikaSender.php';
 R::setup('sqlite:' . DB_PATH);
 R::freeze(true);
 
+// Миграции
+try { R::exec('ALTER TABLE calls ADD COLUMN sent_client_id TEXT'); } catch (Exception $e) {}
+
 // ── AJAX-обработчики ──────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json');
