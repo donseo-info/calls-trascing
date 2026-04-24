@@ -17,3 +17,6 @@ define('FALLBACK_PHONE', '+79884007097');
 
 // OAuth токен Яндекс.Метрики (https://oauth.yandex.ru/)
 define('METRIKA_ACCESS_TOKEN', 'y0__xClvatBGIaSPSDw9JWUFogXGTav5e_wSbeLD9UrUG48h1We');
+
+// Папка для сохранения CSV файлов отправленных в Метрику (null — не сохранять)
+define('METRIKA_CSV_DIR', __DIR__ . '/logs/csv_files');

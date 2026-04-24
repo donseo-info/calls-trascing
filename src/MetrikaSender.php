@@ -89,12 +89,24 @@ class MetrikaSender
             return ['success' => false, 'error' => $curlError, 'http_code' => $httpCode, 'csv' => $csv];
         }
 
+        $success = $httpCode === 200;
+
+        // Сохраняем CSV на диск если задана папка
+        $csvFile = null;
+        if ($success && defined('METRIKA_CSV_DIR') && METRIKA_CSV_DIR) {
+            $dir = METRIKA_CSV_DIR;
+            if (!is_dir($dir)) mkdir($dir, 0755, true);
+            $csvFile = $dir . '/conv_' . date('Y-m-d_H-i-s') . '_' . uniqid() . '.csv';
+            file_put_contents($csvFile, $csv);
+        }
+
         return [
-            'success'      => $httpCode === 200,
+            'success'      => $success,
             'http_code'    => $httpCode,
             'response'     => json_decode($response, true),
             'raw_response' => $response,
             'csv'          => $csv,
+            'csv_file'     => $csvFile,
         ];
     }
 }
