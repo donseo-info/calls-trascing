@@ -231,6 +231,23 @@ $failedCalls = R::getAll(
 
 R::close();
 
+// Последние 10 отправленных CSV файлов
+$lastCsvFiles = [];
+$csvDir = dirname(__DIR__) . '/logs/csv_files';
+if (is_dir($csvDir)) {
+    $csvGlob = glob($csvDir . '/conv_*.csv');
+    if ($csvGlob) {
+        usort($csvGlob, fn($a, $b) => filemtime($b) - filemtime($a));
+        foreach (array_slice($csvGlob, 0, 10) as $f) {
+            $lastCsvFiles[] = [
+                'name'    => basename($f),
+                'time'    => filemtime($f),
+                'content' => trim(file_get_contents($f)),
+            ];
+        }
+    }
+}
+
 // Читаем лог — последние строки с METRIKA
 $metrikaLog = [];
 $logFile = dirname(__DIR__) . '/logs/calls.txt';
@@ -1191,6 +1208,36 @@ function buildUrl($extra = []) {
       </div>
     </div>
 
+  </div>
+
+  <!-- Последние отправленные CSV -->
+  <div class="ct-card mt-3">
+    <div class="ct-card-header">
+      <div class="ct-title"><i class="bi bi-file-earmark-text"></i> Последние отправленные конверсии</div>
+      <div style="font-size:11px;color:#64748b;">последние 10 файлов из logs/csv_files/</div>
+    </div>
+    <?php if ($lastCsvFiles): ?>
+    <div class="table-responsive">
+      <table class="ct-table table table-borderless">
+        <thead>
+          <tr><th>Время</th><th>Файл</th><th>Содержимое CSV</th></tr>
+        </thead>
+        <tbody>
+          <?php foreach ($lastCsvFiles as $cf): ?>
+          <tr>
+            <td style="white-space:nowrap;color:#64748b;"><?= date('d.m.Y H:i:s', $cf['time']) ?></td>
+            <td style="font-family:monospace;font-size:11px;color:#94a3b8;"><?= esc($cf['name']) ?></td>
+            <td>
+              <pre style="margin:0;font-size:11px;background:#f8fbff;padding:6px 10px;border-radius:6px;border:1px solid #dbeafe;color:#1e3a8a;white-space:pre-wrap;word-break:break-all;"><?= esc($cf['content']) ?></pre>
+            </td>
+          </tr>
+          <?php endforeach ?>
+        </tbody>
+      </table>
+    </div>
+    <?php else: ?>
+    <div class="empty-state"><i class="bi bi-file-earmark-x"></i> Файлов ещё нет</div>
+    <?php endif ?>
   </div>
 
 <!-- ══ Запросы номера ══════════════════════════════════════════════ -->
