@@ -44,7 +44,7 @@ class MetrikaSender
             $headers[] = 'ClientId';
             $values[]  = $clientId;
         } elseif ($yclid) {
-            $headers[] = 'Yclid';
+            $headers[] = 'yclid';
             $values[]  = $yclid;
         }
 
