@@ -4,7 +4,7 @@
     {
       "name": "PHP Dev Server",
       "runtimeExecutable": "php",
-      "runtimeArgs": ["-S", "localhost:8080", "-t", "/Volumes/HUB/Site/call-tracking"],
+      "runtimeArgs": ["-S", "localhost:8080", "-t", "/Users/AI/Sites/call-tracking"],
       "port": 8080
     }
   ]

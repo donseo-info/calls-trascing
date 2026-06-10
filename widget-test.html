@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Тест виджета · Call Tracking</title>
+<style>
+  body { font-family:'Segoe UI',system-ui,sans-serif; background:#f3f7fb; color:#0f172a; margin:0; padding:40px 20px; }
+  .wrap { max-width:720px; margin:0 auto; }
+  .card { background:#fff; border:1px solid #dbeafe; border-radius:14px; padding:28px 32px; margin-bottom:20px; box-shadow:0 4px 12px rgba(15,23,42,.06); }
+  h1 { font-size:20px; color:#1d4ed8; margin:0 0 4px; }
+  .sub { color:#64748b; font-size:13px; margin-bottom:24px; }
+  .row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:14px 0; }
+  label { font-size:12px; font-weight:600; color:#475569; }
+  input { font-size:13px; padding:7px 10px; border:1px solid #bfdbfe; border-radius:8px; font-family:monospace; min-width:240px; }
+  button { font-size:13px; padding:7px 16px; border:none; border-radius:8px; background:#1d4ed8; color:#fff; cursor:pointer; }
+  button:hover { background:#1e40af; }
+  .phone-block { font-size:26px; font-weight:700; color:#0f172a; margin:18px 0; }
+  .hint { font-size:12px; color:#94a3b8; line-height:1.7; }
+  code { background:#eff6ff; color:#1d4ed8; padding:2px 6px; border-radius:4px; font-size:12px; }
+  .utm-note { background:#f0fdf4; border:1px solid #bbf7d0; color:#15803d; font-size:12px; padding:10px 14px; border-radius:8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="card">
+    <h1>Тест виджета подмены номера</h1>
+    <div class="sub">Локальная страница-заглушка для проверки call tracking</div>
+
+    <div class="row">
+      <label>Ключ сайта (data-site):</label>
+      <input type="text" id="sitekey" placeholder="вставь site_key">
+      <button onclick="reloadWithKey()">Применить</button>
+    </div>
+    <div class="hint">
+      Ключ берётся из URL <code>?key=…</code> или из поля выше. Найди его в админке → вкладка «Сайты».
+    </div>
+  </div>
+
+  <div class="card">
+    <h1 style="font-size:16px;">Позвоните нам</h1>
+    <div class="phone-block">
+      <span data-ct-phone="+7 (988) 400-70-97"></span>
+    </div>
+    <div class="hint">
+      Выше — виджет. Клик «Показать» → запрос к <code>assign.php</code> → подменный номер.
+      Повторный клик копирует номер.
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="utm-note" id="utm-info">UTM-метки не заданы.</div>
+    <div class="hint" style="margin-top:12px;">
+      Добавь UTM в URL чтобы проверить захват:<br>
+      <code>?key=КЛЮЧ&utm_source=yandex&utm_medium=cpc&utm_campaign=test&yclid=1234567890</code>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="hint">
+      <strong>Что проверить:</strong><br>
+      1. Клик «Показать» выдаёт номер из пула сайта (или fallback если пул пуст).<br>
+      2. В админке → «Запросы» появилась новая сессия с UTM/landing_page.<br>
+      3. Симуляция звонка (вебхук) на выданный номер → в «Звонках» матчинг + отправка в Метрику.<br>
+      4. Без ключа / с неверным ключом виджет показывает fallback-номер из <code>data-ct-phone</code>.
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // Ключ из URL ?key= или localStorage
+  var params = new URLSearchParams(location.search);
+  var key = params.get('key') || localStorage.getItem('ct_test_key') || '';
+  if (key) localStorage.setItem('ct_test_key', key);
+  document.getElementById('sitekey').value = key;
+
+  function reloadWithKey() {
+    var k = document.getElementById('sitekey').value.trim();
+    var p = new URLSearchParams(location.search);
+    p.set('key', k);
+    location.search = p.toString();
+  }
+
+  // Показать активные UTM/yclid
+  var utmKeys = ['utm_source','utm_medium','utm_campaign','utm_term','utm_content','yclid'];
+  var found = utmKeys.filter(function(k){ return params.get(k); })
+                     .map(function(k){ return k + '=' + params.get(k); });
+  if (found.length) document.getElementById('utm-info').textContent = 'Метки: ' + found.join('  ');
+
+  // Подключаем виджет с нужным ключом (если есть)
+  if (key) {
+    var s = document.createElement('script');
+    s.src = '/ct.js';
+    s.dataset.site = key;
+    s.dataset.counter = ''; // подставь ID счётчика для getClientID, если нужно
+    document.body.appendChild(s);
+  } else {
+    document.getElementById('utm-info').insertAdjacentHTML('afterend',
+      '<div style="color:#b91c1c;font-size:12px;margin-top:10px;">⚠ Ключ сайта не задан — виджет не подключён. Укажи ключ выше.</div>');
+  }
+</script>
+</body>
+</html>
