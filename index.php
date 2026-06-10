@@ -74,40 +74,40 @@ try { R::exec('ALTER TABLE calls ADD COLUMN site_id INTEGER'); } catch (Exceptio
 
 $now = date('Y-m-d H:i:s');
 
-// Ищем активную сессию с этим подменным номером
-// Берём самую свежую — та что ближе всего к моменту звонка
+// ── Определяем сайт по подменному номеру (авторитетно) ───────────
+// Номер уникален в пуле и принадлежит одному сайту. Это и есть
+// механизм сопоставления вебхуков с разных аккаунтов Novofon:
+// virtual_phone_number → phonepool.site_id → настройки сайта.
+$siteId = R::getCell(
+    "SELECT site_id FROM phonepool WHERE phone LIKE ? ORDER BY id DESC LIMIT 1",
+    ['%' . $virtualPhoneClean . '%']
+);
+$siteId = $siteId ? (int)$siteId : null;
+
+// Ищем сессию в рамках найденного сайта (если сайт известен).
+// Самую свежую активную → ту что ближе к моменту звонка.
+$sessionWhere  = $siteId ? 'site_id = ? AND phone LIKE ?' : 'phone LIKE ?';
+$activeParams  = $siteId ? [$siteId, '%' . $virtualPhoneClean . '%', $now] : ['%' . $virtualPhoneClean . '%', $now];
 $session = R::getRow(
-    "SELECT * FROM sessions
-     WHERE phone LIKE ?
-       AND expires_at > ?
-     ORDER BY revealed_at DESC
-     LIMIT 1",
-    ['%' . $virtualPhoneClean . '%', $now]
+    "SELECT * FROM sessions WHERE {$sessionWhere} AND expires_at > ? ORDER BY revealed_at DESC LIMIT 1",
+    $activeParams
 );
 
-// Если активная сессия не найдена — ищем последнюю истёкшую (звонок мог прийти чуть позже TTL)
+// Если активная не найдена — последняя истёкшая (звонок мог прийти чуть позже TTL)
 if (!$session) {
+    $expiredParams = $siteId ? [$siteId, '%' . $virtualPhoneClean . '%'] : ['%' . $virtualPhoneClean . '%'];
     $session = R::getRow(
-        "SELECT * FROM sessions
-         WHERE phone LIKE ?
-         ORDER BY revealed_at DESC
-         LIMIT 1",
-        ['%' . $virtualPhoneClean . '%']
+        "SELECT * FROM sessions WHERE {$sessionWhere} ORDER BY revealed_at DESC LIMIT 1",
+        $expiredParams
     );
 }
 
 $sessionId = $session ? (int)$session['id'] : null;
 $clientId  = $session ? $session['client_id'] : null;
 
-// ── Определяем сайт ──────────────────────────────────────────────
-// Приоритет: site_id из сессии → по номеру в phonepool
-$siteId = $session && !empty($session['site_id']) ? (int)$session['site_id'] : null;
-if (!$siteId) {
-    $siteId = R::getCell(
-        "SELECT site_id FROM phonepool WHERE phone LIKE ? LIMIT 1",
-        ['%' . $virtualPhoneClean . '%']
-    );
-    $siteId = $siteId ? (int)$siteId : null;
+// Если сайт не нашли по пулу — fallback на site_id сессии
+if (!$siteId && $session && !empty($session['site_id'])) {
+    $siteId = (int)$session['site_id'];
 }
 $site = $siteId ? site_by_id($siteId) : null;
 
