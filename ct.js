@@ -1,4 +1,4 @@
-/* ct.js — call tracking widget v1.1.2 */
+/* ct.js — call tracking widget v1.2.0 (multisite) */
 (function () {
   'use strict';
   var scriptEl = document.currentScript;
@@ -8,6 +8,9 @@
     var src = (scriptEl && scriptEl.src) || '';
     return src.replace(/\/ct\.js(\?.*)?$/, '/api/assign.php');
   })();
+
+  // data-site="KEY" — публичный ключ сайта (обязателен для мультисайта)
+  var siteKey = (scriptEl && scriptEl.dataset.site) || '';
 
   // data-utm-only="1" — подмена только если есть utm_source (в URL или sessionStorage)
   var utmOnly = scriptEl && scriptEl.dataset.utmOnly === '1';
@@ -241,6 +244,7 @@
     // Если по какой-то причине ещё не готов — используем пустую строку.
     var clientId = _cachedClientId;
     var params   = new URLSearchParams({
+      site:         siteKey,
       client_id:    clientId,
       landing_page: window.location.href,
       referrer:     document.referrer || ''

@@ -20,3 +20,10 @@ define('METRIKA_ACCESS_TOKEN', 'y0__xClvatBGIaSPSDw9JWUFogXGTav5e_wSbeLD9UrUG48h
 
 // Папка для сохранения CSV файлов отправленных в Метрику (null — не сохранять)
 define('METRIKA_CSV_DIR', __DIR__ . '/logs/csv_files');
+
+// Пароль для входа в админку
+define('ADMIN_PASSWORD', 'changeme');
+
+// ── Примечание про мультисайт ───────────────────────────────────────
+// Константы METRIKA_* и FALLBACK_PHONE выше — устаревшие, оставлены для
+// миграции. Реальные настройки теперь per-site в таблице `sites`.

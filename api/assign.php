@@ -14,13 +14,27 @@ header('Access-Control-Allow-Origin: *');
 
 require_once dirname(__DIR__) . '/rb.php';
 require_once dirname(__DIR__) . '/config.php';
+require_once dirname(__DIR__) . '/src/sites.php';
 
 R::setup('sqlite:' . DB_PATH);
 R::freeze(true);
 
-$cookieName = 'ct_session';
-$ttlMinutes = SESSION_TTL_MINUTES;
-$now        = date('Y-m-d H:i:s');
+// --- Определяем сайт по ключу ---
+$siteKey = isset($_GET['site']) ? trim($_GET['site']) : null;
+$site    = site_by_key($siteKey);
+
+if (!$site) {
+    http_response_code(400);
+    echo json_encode(['status' => 'error', 'error' => 'unknown site key']);
+    R::close();
+    exit;
+}
+
+$siteId        = (int)$site['id'];
+$cookieName    = 'ct_session_' . $siteId;
+$ttlMinutes    = (int)($site['session_ttl_minutes'] ?: 10);
+$fallbackPhone = $site['fallback_phone'] ?: '';
+$now           = date('Y-m-d H:i:s');
 
 // --- Входные данные ---
 $clientId   = isset($_GET['client_id'])    ? trim($_GET['client_id'])    : null;
@@ -40,16 +54,16 @@ $session = null;
 $sessionCookie = $_COOKIE[$cookieName] ?? null;
 if ($sessionCookie) {
     $session = R::findOne('sessions',
-        'session_cookie = ? AND expires_at > ?',
-        [$sessionCookie, $now]
+        'session_cookie = ? AND site_id = ? AND expires_at > ?',
+        [$sessionCookie, $siteId, $now]
     );
 }
 
 // По client_id если cookie не нашло
 if (!$session && $clientId) {
     $session = R::findOne('sessions',
-        'client_id = ? AND expires_at > ?',
-        [$clientId, $now]
+        'client_id = ? AND site_id = ? AND expires_at > ?',
+        [$clientId, $siteId, $now]
     );
 }
 
@@ -68,16 +82,17 @@ if ($session) {
     exit;
 }
 
-// --- 2. Освобождаем просроченные сессии (попутная очистка) ---
+// --- 2. Освобождаем просроченные сессии этого сайта (попутная очистка) ---
 R::exec("UPDATE sessions SET phonepool_id = NULL, phone = NULL
-         WHERE expires_at IS NOT NULL AND expires_at < ?", [$now]);
+         WHERE site_id = ? AND expires_at IS NOT NULL AND expires_at < ?", [$siteId, $now]);
 
-// --- 3. Ищем свободный номер по round-robin ---
+// --- 3. Ищем свободный номер по round-robin (только пул этого сайта) ---
 // Берём активный номер, который дольше всего не использовался
 $phone = R::getRow(
     "SELECT pp.id, pp.phone
      FROM phonepool pp
-     WHERE pp.is_active = 1
+     WHERE pp.site_id = ?
+       AND pp.is_active = 1
        AND pp.id NOT IN (
            SELECT phonepool_id FROM sessions
            WHERE phonepool_id IS NOT NULL AND expires_at > ?
@@ -86,14 +101,14 @@ $phone = R::getRow(
          SELECT MAX(s.revealed_at) FROM sessions s WHERE s.phonepool_id = pp.id
      ) ASC NULLS FIRST
      LIMIT 1",
-    [$now]
+    [$siteId, $now]
 );
 
 if (!$phone) {
-    // Пул исчерпан — возвращаем fallback номер
+    // Пул исчерпан — возвращаем fallback номер сайта
     echo json_encode([
         'status'   => 'fallback',
-        'phone'    => FALLBACK_PHONE,
+        'phone'    => $fallbackPhone,
     ]);
     R::close();
     exit;
@@ -105,6 +120,7 @@ $expiresAt = date('Y-m-d H:i:s', strtotime("+{$ttlMinutes} minutes"));
 
 $s = R::dispense('sessions');
 $s->session_cookie  = $newCookie;
+$s->site_id         = $siteId;
 $s->client_id       = $clientId;
 $s->ip              = $ip;
 $s->phonepool_id    = (int)$phone['id'];

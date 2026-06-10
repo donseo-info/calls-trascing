@@ -3,6 +3,7 @@
 require_once __DIR__ . '/rb.php';
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/src/MetrikaSender.php';
+require_once __DIR__ . '/src/sites.php';
 
 define('LOG_FILE', __DIR__ . '/logs/calls.txt');
 
@@ -67,8 +68,9 @@ $virtualPhoneClean = preg_replace('/\D/', '', $virtualPhone);
 R::setup('sqlite:' . DB_PATH);
 R::freeze(true);
 
-// Миграция: добавляем sent_client_id если ещё нет
+// Миграция: добавляем sent_client_id / site_id если ещё нет
 try { R::exec('ALTER TABLE calls ADD COLUMN sent_client_id TEXT'); } catch (Exception $e) {}
+try { R::exec('ALTER TABLE calls ADD COLUMN site_id INTEGER'); } catch (Exception $e) {}
 
 $now = date('Y-m-d H:i:s');
 
@@ -97,6 +99,18 @@ if (!$session) {
 $sessionId = $session ? (int)$session['id'] : null;
 $clientId  = $session ? $session['client_id'] : null;
 
+// ── Определяем сайт ──────────────────────────────────────────────
+// Приоритет: site_id из сессии → по номеру в phonepool
+$siteId = $session && !empty($session['site_id']) ? (int)$session['site_id'] : null;
+if (!$siteId) {
+    $siteId = R::getCell(
+        "SELECT site_id FROM phonepool WHERE phone LIKE ? LIMIT 1",
+        ['%' . $virtualPhoneClean . '%']
+    );
+    $siteId = $siteId ? (int)$siteId : null;
+}
+$site = $siteId ? site_by_id($siteId) : null;
+
 // Извлекаем yclid из landing_page если нет client_id
 $yclid = null;
 if (!$clientId && !empty($session['landing_page'])) {
@@ -107,6 +121,7 @@ if (!$clientId && !empty($session['landing_page'])) {
 // ── 5. Сохраняем звонок в БД ──────────────────────────────────────
 $call = R::dispense('calls');
 $call->session_id      = $sessionId;
+$call->site_id         = $siteId;
 $call->caller          = $callerNumber;
 $call->called          = $calledNumber;
 $call->direction       = $direction;
@@ -123,27 +138,32 @@ $call->created_at      = $now;
 $callId = R::store($call);
 
 // Логируем результат матчинга
-$matchLog = $ts . ' MATCH:   session_id=' . ($sessionId ?? 'null')
+$matchLog = $ts . ' MATCH:   site_id=' . ($siteId ?? 'null')
+          . ' session_id=' . ($sessionId ?? 'null')
           . ' client_id=' . ($clientId ?? 'null')
           . ' yclid=' . ($yclid ?? 'null')
           . ' call_id=' . $callId . PHP_EOL;
 file_put_contents(LOG_FILE, $matchLog, FILE_APPEND | LOCK_EX);
 
-// ── 6. Отправляем офлайн конверсию в Метрику ─────────────────────
-// Отправляем только если есть хотя бы один идентификатор
+// ── 6. Отправляем офлайн конверсию в Метрику (конфиг сайта) ──────
+// Настройки Метрики берём из сайта; нужен идентификатор + токен + счётчик
+$mToken   = $site['metrika_access_token'] ?? null;
+$mCounter = $site['metrika_counter_id']   ?? null;
+$mGoal    = $site['metrika_goal_id']      ?? 'send_lead';
+
 $hasIdentifier = !empty($clientId) || !empty($yclid) || !empty($callerNumber);
 
-if ($hasIdentifier && METRIKA_ACCESS_TOKEN && METRIKA_COUNTER_ID) {
+if ($hasIdentifier && $mToken && $mCounter) {
 
-    // Проверяем дубль по client_id
+    // Проверяем дубль по client_id в рамках этого сайта
     $isDuplicate = false;
 
     if ($clientId) {
         $isDuplicate = (int)R::getCell(
             "SELECT COUNT(*) FROM calls c
              JOIN sessions s ON s.id = c.session_id
-             WHERE s.client_id = ? AND c.goal_sent = 1 AND c.id != ?",
-            [$clientId, $callId]
+             WHERE s.client_id = ? AND s.site_id = ? AND c.goal_sent = 1 AND c.id != ?",
+            [$clientId, $siteId, $callId]
         ) > 0;
     }
 
@@ -152,12 +172,12 @@ if ($hasIdentifier && METRIKA_ACCESS_TOKEN && METRIKA_COUNTER_ID) {
         $metrikaLog = $ts . ' METRIKA: duplicate client_id=' . $clientId . ' goal not sent' . PHP_EOL;
         file_put_contents(LOG_FILE, $metrikaLog, FILE_APPEND | LOCK_EX);
     } else {
-        $metrika   = new MetrikaSender(METRIKA_ACCESS_TOKEN);
+        $metrika   = new MetrikaSender($mToken);
         $timestamp = strtotime($callTime) ?: time();
 
         $result = $metrika->send(
-            METRIKA_COUNTER_ID,
-            METRIKA_GOAL_ID,
+            $mCounter,
+            $mGoal,
             $timestamp,
             $clientId     ?: null,
             $yclid        ?: null,
@@ -176,7 +196,7 @@ if ($hasIdentifier && METRIKA_ACCESS_TOKEN && METRIKA_COUNTER_ID) {
         file_put_contents(LOG_FILE, $metrikaLog, FILE_APPEND | LOCK_EX);
     }
 } else {
-    $metrikaLog = $ts . ' METRIKA: skipped (no identifier or token not set)' . PHP_EOL;
+    $metrikaLog = $ts . ' METRIKA: skipped (no identifier/site/token)' . PHP_EOL;
     file_put_contents(LOG_FILE, $metrikaLog, FILE_APPEND | LOCK_EX);
 }
 

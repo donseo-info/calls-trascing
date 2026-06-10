@@ -1,18 +1,88 @@
 <?php
+session_start();
 require_once dirname(__DIR__) . '/rb.php';
 require_once dirname(__DIR__) . '/config.php';
 require_once dirname(__DIR__) . '/src/MetrikaSender.php';
+require_once dirname(__DIR__) . '/src/sites.php';
 
 R::setup('sqlite:' . DB_PATH);
 R::freeze(true);
 
-// Миграции
+// ── Миграции (на случай если migrate_multisite.php ещё не запускали) ──
 try { R::exec('ALTER TABLE calls ADD COLUMN sent_client_id TEXT'); } catch (Exception $e) {}
+R::exec("CREATE TABLE IF NOT EXISTS sites (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    name                  TEXT NOT NULL,
+    domain                TEXT,
+    site_key              TEXT NOT NULL UNIQUE,
+    metrika_counter_id    TEXT,
+    metrika_access_token  TEXT,
+    metrika_goal_id       TEXT,
+    fallback_phone        TEXT,
+    session_ttl_minutes   INTEGER NOT NULL DEFAULT 10,
+    is_active             INTEGER NOT NULL DEFAULT 1,
+    created_at            TEXT NOT NULL DEFAULT (datetime('now'))
+)");
+foreach (['phonepool', 'sessions', 'calls'] as $t) {
+    try { R::exec("ALTER TABLE {$t} ADD COLUMN site_id INTEGER"); } catch (Exception $e) {}
+}
+
+// ── Авторизация ───────────────────────────────────────────────────
+if (isset($_GET['logout'])) {
+    session_destroy();
+    header('Location: ?'); exit;
+}
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'login') {
+    if (($_POST['password'] ?? '') === ADMIN_PASSWORD) {
+        $_SESSION['ct_auth'] = true;
+        header('Location: ?'); exit;
+    }
+    $loginError = 'Неверный пароль';
+}
+
+if (empty($_SESSION['ct_auth'])) {
+    R::close();
+    ?>
+    <!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Вход · Call Tracking</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    </head>
+    <body style="background:#f3f7fb;font-family:'Segoe UI',system-ui,sans-serif;">
+      <div class="d-flex align-items-center justify-content-center" style="min-height:100vh;">
+        <form method="post" class="p-4 bg-white rounded shadow-sm" style="width:320px;border:1px solid #dbeafe;">
+          <h5 class="mb-3" style="color:#1d4ed8;font-weight:700;">Call Tracking</h5>
+          <?php if (!empty($loginError)): ?>
+            <div class="alert alert-danger py-2" style="font-size:13px;"><?= esc($loginError) ?></div>
+          <?php endif ?>
+          <input type="hidden" name="action" value="login">
+          <input type="password" name="password" class="form-control mb-3" placeholder="Пароль" autofocus required>
+          <button class="btn btn-primary w-100">Войти</button>
+        </form>
+      </div>
+    </body></html>
+    <?php
+    exit;
+}
+
+// ── Текущий сайт ──────────────────────────────────────────────────
+$sites = sites_all();
+if (isset($_GET['site_id'])) {
+    $_SESSION['ct_site'] = (int)$_GET['site_id'];
+}
+$currentSiteId = (int)($_SESSION['ct_site'] ?? ($sites[0]['id'] ?? 0));
+// Валидируем что сайт существует
+$siteIds = array_map(fn($s) => (int)$s['id'], $sites);
+if ($sites && !in_array($currentSiteId, $siteIds, true)) {
+    $currentSiteId = (int)$sites[0]['id'];
+    $_SESSION['ct_site'] = $currentSiteId;
+}
+$currentSite = $currentSiteId ? site_by_id($currentSiteId) : null;
 
 // ── AJAX-обработчики ──────────────────────────────────────────────
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] !== 'login') {
     header('Content-Type: application/json');
-    $action = $_POST['action'] ?? '';
+    $action = $_POST['action'];
 
     if ($action === 'toggle_phone') {
         $id    = (int)($_POST['id'] ?? 0);
@@ -28,13 +98,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'add_phone') {
-        $raw   = trim($_POST['phone'] ?? '');
-        $phone = preg_replace('/\D/', '', $raw);
-        if (strlen($phone) >= 10) {
+        $raw    = trim($_POST['phone'] ?? '');
+        $siteId = (int)($_POST['site_id'] ?? $currentSiteId);
+        $phone  = preg_replace('/\D/', '', $raw);
+        if (!$siteId) {
+            echo json_encode(['success' => false, 'error' => 'Сначала создайте сайт']);
+        } elseif (strlen($phone) >= 10) {
             $exists = R::findOne('phonepool', 'phone = ?', [$phone]);
             if (!$exists) {
                 $p             = R::dispense('phonepool');
                 $p->phone      = $phone;
+                $p->site_id    = $siteId;
                 $p->is_active  = 1;
                 $p->created_at = date('Y-m-d H:i:s');
                 R::store($p);
@@ -60,12 +134,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         R::close(); exit;
     }
 
+    if ($action === 'save_site') {
+        $id    = (int)($_POST['id'] ?? 0);
+        $name  = trim($_POST['name'] ?? '');
+        if ($name === '') {
+            echo json_encode(['success' => false, 'error' => 'Укажите название']);
+            R::close(); exit;
+        }
+        $site = $id ? R::load('sites', $id) : R::dispense('sites');
+        if (!$id || $site->id) {
+            $site->name                 = $name;
+            $site->domain               = trim($_POST['domain'] ?? '');
+            $site->metrika_counter_id   = trim($_POST['metrika_counter_id'] ?? '');
+            $site->metrika_access_token = trim($_POST['metrika_access_token'] ?? '');
+            $site->metrika_goal_id      = trim($_POST['metrika_goal_id'] ?? '') ?: 'send_lead';
+            $site->fallback_phone       = trim($_POST['fallback_phone'] ?? '');
+            $site->session_ttl_minutes  = (int)($_POST['session_ttl_minutes'] ?? 10) ?: 10;
+            $site->is_active            = isset($_POST['is_active']) ? (int)$_POST['is_active'] : 1;
+            if (!$id) {
+                $site->site_key   = bin2hex(random_bytes(8));
+                $site->created_at = date('Y-m-d H:i:s');
+            }
+            $newId = R::store($site);
+            echo json_encode(['success' => true, 'id' => (int)$newId, 'site_key' => $site->site_key]);
+        } else {
+            echo json_encode(['success' => false, 'error' => 'Сайт не найден']);
+        }
+        R::close(); exit;
+    }
+
+    if ($action === 'delete_site') {
+        $id   = (int)($_POST['id'] ?? 0);
+        $site = R::load('sites', $id);
+        if ($site->id) {
+            // Чистим данные сайта
+            R::exec('DELETE FROM calls WHERE site_id = ?', [$id]);
+            R::exec('DELETE FROM sessions WHERE site_id = ?', [$id]);
+            R::exec('DELETE FROM phonepool WHERE site_id = ?', [$id]);
+            R::trash($site);
+            echo json_encode(['success' => true]);
+        } else {
+            echo json_encode(['success' => false]);
+        }
+        R::close(); exit;
+    }
+
     if ($action === 'resend_metrika') {
         $callId    = (int)($_POST['call_id']  ?? 0);
         $clientId  = trim($_POST['client_id'] ?? '') ?: null;
         $yclid     = trim($_POST['yclid']     ?? '') ?: null;
         $phone     = trim($_POST['phone']     ?? '') ?: null;
-        $goal      = trim($_POST['goal']      ?? '') ?: METRIKA_GOAL_ID;
         $datetime  = trim($_POST['datetime']  ?? '');
         $timestamp = $datetime ? strtotime($datetime) : time();
 
@@ -78,8 +196,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             R::close(); exit;
         }
 
-        $metrika = new MetrikaSender(METRIKA_ACCESS_TOKEN);
-        $result  = $metrika->send(METRIKA_COUNTER_ID, $goal, $timestamp, $clientId, $yclid, $phone);
+        // Настройки Метрики берём из сайта звонка
+        $callSiteId = (int)R::getCell('SELECT site_id FROM calls WHERE id = ?', [$callId]);
+        $callSite   = $callSiteId ? site_by_id($callSiteId) : $currentSite;
+        $token   = $callSite['metrika_access_token'] ?? '';
+        $counter = $callSite['metrika_counter_id']   ?? '';
+        $goal    = trim($_POST['goal'] ?? '') ?: ($callSite['metrika_goal_id'] ?? 'send_lead');
+
+        if (!$token || !$counter) {
+            echo json_encode(['success' => false, 'error' => 'У сайта не задан токен/счётчик Метрики']);
+            R::close(); exit;
+        }
+
+        $metrika = new MetrikaSender($token);
+        $result  = $metrika->send($counter, $goal, $timestamp, $clientId, $yclid, $phone);
 
         if (!empty($result['success'])) {
             R::exec('UPDATE calls SET goal_sent = 1, sent_client_id = ? WHERE id = ?', [$clientId, $callId]);
@@ -99,29 +229,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     R::close(); exit;
 }
 
-// ── Дашборд: статистика ───────────────────────────────────────────
+// ── Дашборд: статистика (scope по текущему сайту) ─────────────────
 $today = date('Y-m-d');
 $now   = date('Y-m-d H:i:s');
+$sid   = $currentSiteId;
 
-$callsToday   = (int)R::getCell('SELECT COUNT(*) FROM calls WHERE DATE(created_at) = ?', [$today]);
-$matchedToday = (int)R::getCell('SELECT COUNT(*) FROM calls WHERE DATE(created_at) = ? AND session_id IS NOT NULL', [$today]);
-$goalsSent      = (int)R::getCell('SELECT COUNT(*) FROM calls WHERE DATE(created_at) = ? AND goal_sent = 1', [$today]);
-$goalsDuplicate = (int)R::getCell('SELECT COUNT(*) FROM calls WHERE DATE(created_at) = ? AND goal_sent = 2', [$today]);
-$totalPhones  = (int)R::getCell('SELECT COUNT(*) FROM phonepool WHERE is_active = 1');
+$callsToday   = (int)R::getCell('SELECT COUNT(*) FROM calls WHERE DATE(created_at) = ? AND site_id = ?', [$today, $sid]);
+$matchedToday = (int)R::getCell('SELECT COUNT(*) FROM calls WHERE DATE(created_at) = ? AND site_id = ? AND session_id IS NOT NULL', [$today, $sid]);
+$goalsSent      = (int)R::getCell('SELECT COUNT(*) FROM calls WHERE DATE(created_at) = ? AND site_id = ? AND goal_sent = 1', [$today, $sid]);
+$goalsDuplicate = (int)R::getCell('SELECT COUNT(*) FROM calls WHERE DATE(created_at) = ? AND site_id = ? AND goal_sent = 2', [$today, $sid]);
+$totalPhones  = (int)R::getCell('SELECT COUNT(*) FROM phonepool WHERE is_active = 1 AND site_id = ?', [$sid]);
 $busyPhones   = (int)R::getCell(
-    'SELECT COUNT(DISTINCT phonepool_id) FROM sessions WHERE phonepool_id IS NOT NULL AND expires_at > ?',
-    [$now]
+    'SELECT COUNT(DISTINCT phonepool_id) FROM sessions WHERE site_id = ? AND phonepool_id IS NOT NULL AND expires_at > ?',
+    [$sid, $now]
 );
 $freePhones     = $totalPhones - $busyPhones;
-$requestsToday  = (int)R::getCell('SELECT COUNT(*) FROM sessions WHERE DATE(created_at) = ?', [$today]);
+$requestsToday  = (int)R::getCell('SELECT COUNT(*) FROM sessions WHERE DATE(created_at) = ? AND site_id = ?', [$today, $sid]);
 $convRate       = $requestsToday > 0 ? round($callsToday / $requestsToday * 100) : 0;
 
 // Звонки за 7 дней для мини-графика
 $weekStats = R::getAll(
     "SELECT DATE(created_at) as day, COUNT(*) as cnt
      FROM calls
-     WHERE DATE(created_at) >= DATE('now', '-6 days')
-     GROUP BY day ORDER BY day ASC"
+     WHERE site_id = ? AND DATE(created_at) >= DATE('now', '-6 days')
+     GROUP BY day ORDER BY day ASC",
+    [$sid]
 );
 
 // ── Вкладка «Звонки»: фильтры + пагинация ────────────────────────
@@ -133,8 +265,8 @@ $search    = trim($_GET['search']    ?? '');
 $dirFilter = trim($_GET['direction'] ?? '');
 $dateFilter= trim($_GET['date']      ?? '');
 
-$where  = [];
-$params = [];
+$where  = ['c.site_id = ?'];
+$params = [$sid];
 
 if ($search !== '') {
     $where[]  = '(c.caller LIKE ? OR c.called LIKE ? OR s.client_id LIKE ? OR s.utm_source LIKE ?)';
@@ -181,13 +313,15 @@ $phones = R::getAll(
                 WHERE s.phonepool_id = pp.id AND s.expires_at > ?
             ) THEN 1 ELSE 0 END as is_busy
      FROM phonepool pp
+     WHERE pp.site_id = ?
      ORDER BY pp.id ASC",
-    [$now]
+    [$now, $sid]
 );
 
 // Последние 6 звонков для дашборда
 $lastCalls = R::getAll(
-    'SELECT caller, called, direction, call_time, goal_sent FROM calls ORDER BY created_at DESC LIMIT 6'
+    'SELECT caller, called, direction, call_time, goal_sent FROM calls WHERE site_id = ? ORDER BY created_at DESC LIMIT 6',
+    [$sid]
 );
 
 // ── Вкладка «Запросы» ─────────────────────────────────────────────
@@ -195,28 +329,29 @@ $sessionsAll   = [];
 $totalSessions = 0;
 $totalReqPages = 1;
 if ($tab === 'requests') {
-    $totalSessions = (int)R::getCell('SELECT COUNT(*) FROM sessions');
+    $totalSessions = (int)R::getCell('SELECT COUNT(*) FROM sessions WHERE site_id = ?', [$sid]);
     $totalReqPages = max(1, (int)ceil($totalSessions / $perPage));
     $sessionsAll = R::getAll(
         "SELECT s.id, s.created_at, s.client_id, s.phone,
                 s.utm_source, s.utm_medium, s.landing_page, s.ip,
                 (SELECT COUNT(*) FROM calls c WHERE c.session_id = s.id) as call_count
          FROM sessions s
+         WHERE s.site_id = ?
          ORDER BY s.created_at DESC
          LIMIT ? OFFSET ?",
-        [$perPage, $offset]
+        [$sid, $perPage, $offset]
     );
 }
 
 // ── Вкладка «Метрика» ─────────────────────────────────────────────
 $goalsFailedToday    = (int)R::getCell(
-    'SELECT COUNT(*) FROM calls WHERE DATE(created_at) = ? AND goal_sent = 0 AND session_id IS NOT NULL', [$today]
+    'SELECT COUNT(*) FROM calls WHERE DATE(created_at) = ? AND site_id = ? AND goal_sent = 0 AND session_id IS NOT NULL', [$today, $sid]
 );
 $goalsNoSessionToday = (int)R::getCell(
-    'SELECT COUNT(*) FROM calls WHERE DATE(created_at) = ? AND goal_sent = 0 AND session_id IS NULL', [$today]
+    'SELECT COUNT(*) FROM calls WHERE DATE(created_at) = ? AND site_id = ? AND goal_sent = 0 AND session_id IS NULL', [$today, $sid]
 );
 $goalsDuplicateToday = (int)R::getCell(
-    'SELECT COUNT(*) FROM calls WHERE DATE(created_at) = ? AND goal_sent = 2', [$today]
+    'SELECT COUNT(*) FROM calls WHERE DATE(created_at) = ? AND site_id = ? AND goal_sent = 2', [$today, $sid]
 );
 $failedCalls = R::getAll(
     "SELECT c.id, c.caller, c.call_time, c.created_at,
@@ -224,9 +359,10 @@ $failedCalls = R::getAll(
             s.landing_page
      FROM calls c
      LEFT JOIN sessions s ON s.id = c.session_id
-     WHERE c.goal_sent = 0 AND c.session_id IS NOT NULL
+     WHERE c.site_id = ? AND c.goal_sent = 0 AND c.session_id IS NOT NULL
      ORDER BY c.created_at DESC
-     LIMIT 50"
+     LIMIT 50",
+    [$sid]
 );
 
 R::close();
@@ -581,7 +717,26 @@ function buildUrl($extra = []) {
     <div class="dot"><i class="bi bi-telephone-fill"></i></div>
     Call Tracking
   </div>
-  <div class="ct-now" id="ct-clock"></div>
+  <div class="d-flex align-items-center gap-3">
+    <?php if ($sites): ?>
+    <form method="get" class="d-flex align-items-center gap-1" id="site-switch-form">
+      <input type="hidden" name="tab" value="<?= esc($_GET['tab'] ?? 'dashboard') ?>">
+      <i class="bi bi-globe2" style="color:#94a3b8;"></i>
+      <select name="site_id" class="form-select form-select-sm" style="font-size:12px;border-color:#bfdbfe;width:auto;"
+              onchange="document.getElementById('site-switch-form').submit()">
+        <?php foreach ($sites as $st): ?>
+          <option value="<?= (int)$st['id'] ?>" <?= (int)$st['id'] === $currentSiteId ? 'selected' : '' ?>>
+            <?= esc($st['name']) ?><?= $st['is_active'] ? '' : ' (выкл)' ?>
+          </option>
+        <?php endforeach ?>
+      </select>
+    </form>
+    <?php endif ?>
+    <div class="ct-now" id="ct-clock"></div>
+    <a href="?logout=1" class="btn btn-sm btn-outline-secondary" style="font-size:11px;padding:2px 8px;" title="Выйти">
+      <i class="bi bi-box-arrow-right"></i>
+    </a>
+  </div>
 </header>
 
 <!-- Навигация -->
@@ -620,6 +775,12 @@ function buildUrl($extra = []) {
         <?php if ($goalsFailedToday > 0): ?>
           <span class="badge rounded-pill ms-1" style="background:#fee2e2;color:#b91c1c;font-size:10px;"><?= $goalsFailedToday ?></span>
         <?php endif ?>
+      </a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link <?= activeTab('sites', $tab) ?>" href="?tab=sites">
+        <i class="bi bi-globe2"></i> Сайты
+        <span class="badge rounded-pill ms-1" style="background:#eef2ff;color:#6366f1;font-size:10px;"><?= count($sites) ?></span>
       </a>
     </li>
   </ul>
@@ -1350,6 +1511,67 @@ function buildUrl($extra = []) {
     <?php endif ?>
   </div>
 
+<!-- ══ Сайты ═══════════════════════════════════════════════════════ -->
+<?php elseif ($tab === 'sites'):
+  $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+  $host   = $_SERVER['HTTP_HOST'] ?? '';
+  $base   = $scheme . '://' . $host . rtrim(dirname(dirname($_SERVER['SCRIPT_NAME'])), '/\\');
+?>
+
+  <div class="ct-card">
+    <div class="ct-card-header">
+      <div class="ct-title"><i class="bi bi-globe2"></i> Сайты</div>
+      <button class="btn btn-primary btn-sm" id="btn-add-site" style="font-size:12px;">
+        <i class="bi bi-plus-lg me-1"></i>Добавить сайт
+      </button>
+    </div>
+    <div class="table-responsive">
+      <table class="ct-table table table-borderless">
+        <thead>
+          <tr>
+            <th>#</th><th>Название</th><th>Домен</th><th>Ключ</th>
+            <th>Счётчик</th><th>TTL</th><th>Статус</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <?php if ($sites): foreach ($sites as $st): ?>
+          <tr>
+            <td style="color:#cbd5e1;font-size:11px;"><?= (int)$st['id'] ?></td>
+            <td style="font-weight:600;color:#1e3a8a;"><?= esc($st['name']) ?></td>
+            <td style="font-size:11px;color:#64748b;"><?= esc($st['domain'] ?: '—') ?></td>
+            <td><span class="cid-tag" title="нажми чтобы скопировать" style="cursor:pointer;"
+                      onclick="navigator.clipboard.writeText('<?= esc($st['site_key']) ?>');showToast('Ключ скопирован',true)"><?= esc($st['site_key']) ?></span></td>
+            <td style="font-size:11px;font-family:monospace;color:#475569;"><?= esc($st['metrika_counter_id'] ?: '—') ?></td>
+            <td style="font-size:11px;color:#64748b;"><?= (int)$st['session_ttl_minutes'] ?>м</td>
+            <td>
+              <?php if ($st['is_active']): ?><span class="badge badge-on">● вкл</span>
+              <?php else: ?><span class="badge badge-off">○ выкл</span><?php endif ?>
+            </td>
+            <td>
+              <div class="d-flex gap-1">
+                <button class="btn-resend btn-site-snippet"
+                  title="Код виджета"
+                  data-base="<?= esc($base) ?>"
+                  data-key="<?= esc($st['site_key']) ?>"
+                  data-counter="<?= esc($st['metrika_counter_id']) ?>"><i class="bi bi-code-slash"></i></button>
+                <button class="btn-resend btn-edit-site"
+                  title="Редактировать"
+                  data-site='<?= esc(json_encode($st, JSON_UNESCAPED_UNICODE)) ?>'><i class="bi bi-pencil"></i></button>
+                <button class="btn-resend btn-delete-site"
+                  title="Удалить сайт со всеми данными"
+                  data-id="<?= (int)$st['id'] ?>" data-name="<?= esc($st['name']) ?>"
+                  style="color:#ef4444;border-color:#fecaca;"><i class="bi bi-trash3"></i></button>
+              </div>
+            </td>
+          </tr>
+          <?php endforeach; else: ?>
+          <tr><td colspan="8"><div class="empty-state"><i class="bi bi-globe2"></i> Сайтов нет — добавьте первый</div></td></tr>
+          <?php endif ?>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
 <?php endif ?>
 </div><!-- /container -->
 
@@ -1430,6 +1652,85 @@ function buildUrl($extra = []) {
         <button type="button" id="rm-submit" class="btn btn-primary btn-sm">
           <i class="bi bi-send me-1"></i>Отправить в Метрику
         </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Модал: сайт (создание/редактирование) -->
+<div class="modal fade" id="siteModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content" style="border:1px solid #dbeafe;border-radius:12px;">
+      <div class="modal-header" style="background:#e0f2fe;border-bottom:1px solid #bfdbfe;">
+        <h5 class="modal-title" id="siteModalTitle" style="font-size:14px;font-weight:700;color:#1e3a8a;">
+          <i class="bi bi-globe2 me-2"></i>Сайт
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" style="background:#f8fbff;">
+        <input type="hidden" id="sm-id">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label fw-semibold" style="font-size:12px;">Название *</label>
+            <input type="text" id="sm-name" class="form-control form-control-sm" placeholder="Мой сайт">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold" style="font-size:12px;">Домен</label>
+            <input type="text" id="sm-domain" class="form-control form-control-sm" placeholder="example.ru">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold" style="font-size:12px;">ID счётчика Метрики</label>
+            <input type="text" id="sm-counter" class="form-control form-control-sm" style="font-family:monospace;" placeholder="108141615">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold" style="font-size:12px;">Название цели</label>
+            <input type="text" id="sm-goal" class="form-control form-control-sm" style="font-family:monospace;" placeholder="send_lead">
+          </div>
+          <div class="col-12">
+            <label class="form-label fw-semibold" style="font-size:12px;">OAuth токен Метрики</label>
+            <input type="text" id="sm-token" class="form-control form-control-sm" style="font-family:monospace;font-size:11px;" placeholder="y0__...">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold" style="font-size:12px;">Fallback-номер</label>
+            <input type="text" id="sm-fallback" class="form-control form-control-sm" style="font-family:monospace;" placeholder="+79001234567">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label fw-semibold" style="font-size:12px;">TTL (мин)</label>
+            <input type="number" id="sm-ttl" class="form-control form-control-sm" value="10" min="1">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label fw-semibold" style="font-size:12px;">Статус</label>
+            <select id="sm-active" class="form-select form-select-sm">
+              <option value="1">Включён</option>
+              <option value="0">Выключен</option>
+            </select>
+          </div>
+        </div>
+        <div id="sm-result" class="mt-3" style="display:none;"></div>
+      </div>
+      <div class="modal-footer" style="background:#f8fbff;border-top:1px solid #dbeafe;">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Отмена</button>
+        <button type="button" id="sm-submit" class="btn btn-primary btn-sm"><i class="bi bi-check-lg me-1"></i>Сохранить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Модал: код виджета -->
+<div class="modal fade" id="snippetModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content" style="border:1px solid #dbeafe;border-radius:12px;">
+      <div class="modal-header" style="background:#e0f2fe;border-bottom:1px solid #bfdbfe;">
+        <h5 class="modal-title" style="font-size:14px;font-weight:700;color:#1e3a8a;"><i class="bi bi-code-slash me-2"></i>Код для установки</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" style="background:#f8fbff;">
+        <label class="form-label fw-semibold" style="font-size:12px;">1. Виджет на страницы сайта (перед &lt;/body&gt;)</label>
+        <pre id="snippet-widget" style="font-size:11px;background:#0f172a;color:#86efac;padding:12px;border-radius:8px;white-space:pre-wrap;word-break:break-all;"></pre>
+        <div class="mb-2" style="font-size:11px;color:#64748b;">Номер выводится в элементе с атрибутом <code>data-ct-phone</code>:</div>
+        <pre id="snippet-html" style="font-size:11px;background:#0f172a;color:#93c5fd;padding:12px;border-radius:8px;white-space:pre-wrap;word-break:break-all;"></pre>
+        <label class="form-label fw-semibold mt-2" style="font-size:12px;">2. URL вебхука для Novofon</label>
+        <pre id="snippet-webhook" style="font-size:11px;background:#0f172a;color:#fbbf24;padding:12px;border-radius:8px;white-space:pre-wrap;word-break:break-all;"></pre>
       </div>
     </div>
   </div>
@@ -1521,6 +1822,7 @@ var rmCallId = null;
 document.addEventListener('click', function(e) {
   var btn = e.target.closest('.btn-resend');
   if (!btn) return;
+  if (!btn.dataset.callId) return; // не resend-кнопка (напр. кнопки сайта)
   rmCallId = btn.dataset.callId;
   document.getElementById('rm-client-id').value   = btn.dataset.clientId   || '';
   document.getElementById('rm-yclid').value        = btn.dataset.yclid       || '';
@@ -1590,6 +1892,7 @@ if (addForm) {
     var fd = new FormData();
     fd.append('action', 'add_phone');
     fd.append('phone', phone);
+    fd.append('site_id', <?= (int)$currentSiteId ?>);
     var msg = document.getElementById('add-phone-msg');
     fetch(window.location.pathname + '?tab=pool', { method: 'POST', body: fd })
       .then(r => r.json())
@@ -1609,6 +1912,96 @@ if (addForm) {
       .catch(function() { showToast('Ошибка сети', false); });
   });
 }
+
+// ── Сайты: CRUD ───────────────────────────────────────────────────
+var siteModalEl = document.getElementById('siteModal');
+var siteModal   = siteModalEl ? new bootstrap.Modal(siteModalEl) : null;
+var snippetModalEl = document.getElementById('snippetModal');
+var snippetModal   = snippetModalEl ? new bootstrap.Modal(snippetModalEl) : null;
+
+function openSiteModal(site) {
+  document.getElementById('siteModalTitle').innerHTML = site
+    ? '<i class="bi bi-pencil me-2"></i>Редактировать сайт'
+    : '<i class="bi bi-plus-lg me-2"></i>Новый сайт';
+  document.getElementById('sm-id').value       = site ? site.id : '';
+  document.getElementById('sm-name').value     = site ? (site.name || '') : '';
+  document.getElementById('sm-domain').value   = site ? (site.domain || '') : '';
+  document.getElementById('sm-counter').value  = site ? (site.metrika_counter_id || '') : '';
+  document.getElementById('sm-goal').value     = site ? (site.metrika_goal_id || 'send_lead') : 'send_lead';
+  document.getElementById('sm-token').value    = site ? (site.metrika_access_token || '') : '';
+  document.getElementById('sm-fallback').value = site ? (site.fallback_phone || '') : '';
+  document.getElementById('sm-ttl').value      = site ? (site.session_ttl_minutes || 10) : 10;
+  document.getElementById('sm-active').value   = site ? (site.is_active ? '1' : '0') : '1';
+  document.getElementById('sm-result').style.display = 'none';
+  siteModal.show();
+}
+
+var addSiteBtn = document.getElementById('btn-add-site');
+if (addSiteBtn) addSiteBtn.addEventListener('click', function() { openSiteModal(null); });
+
+document.addEventListener('click', function(e) {
+  var edit = e.target.closest('.btn-edit-site');
+  if (edit) { openSiteModal(JSON.parse(edit.dataset.site)); return; }
+
+  var snip = e.target.closest('.btn-site-snippet');
+  if (snip) {
+    var base = snip.dataset.base, key = snip.dataset.key, counter = snip.dataset.counter || '';
+    var counterAttr = counter ? ' data-counter="' + counter + '"' : '';
+    document.getElementById('snippet-widget').textContent =
+      '<script src="' + base + '/ct.js" data-site="' + key + '"' + counterAttr + '><\/script>';
+    document.getElementById('snippet-html').textContent =
+      '<span data-ct-phone="+7 (988) 400-70-97"></span>';
+    document.getElementById('snippet-webhook').textContent = base + '/index.php';
+    snippetModal.show();
+    return;
+  }
+
+  var del = e.target.closest('.btn-delete-site');
+  if (del) {
+    if (!confirm('Удалить сайт «' + del.dataset.name + '» вместе со всеми номерами, сессиями и звонками?')) return;
+    var fd = new FormData();
+    fd.append('action', 'delete_site');
+    fd.append('id', del.dataset.id);
+    fetch(window.location.pathname, { method: 'POST', body: fd })
+      .then(r => r.json())
+      .then(function(data) {
+        if (data.success) { showToast('Сайт удалён', true); setTimeout(() => location.reload(), 600); }
+        else showToast('Ошибка удаления', false);
+      });
+    return;
+  }
+});
+
+var smSubmit = document.getElementById('sm-submit');
+if (smSubmit) smSubmit.addEventListener('click', function() {
+  var name = document.getElementById('sm-name').value.trim();
+  if (!name) { showToast('Укажите название', false); return; }
+  var btn = this;
+  btn.disabled = true;
+  var fd = new FormData();
+  fd.append('action', 'save_site');
+  fd.append('id',                   document.getElementById('sm-id').value);
+  fd.append('name',                 name);
+  fd.append('domain',               document.getElementById('sm-domain').value.trim());
+  fd.append('metrika_counter_id',   document.getElementById('sm-counter').value.trim());
+  fd.append('metrika_goal_id',      document.getElementById('sm-goal').value.trim());
+  fd.append('metrika_access_token', document.getElementById('sm-token').value.trim());
+  fd.append('fallback_phone',       document.getElementById('sm-fallback').value.trim());
+  fd.append('session_ttl_minutes',  document.getElementById('sm-ttl').value);
+  fd.append('is_active',            document.getElementById('sm-active').value);
+  fetch(window.location.pathname, { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(function(data) {
+      btn.disabled = false;
+      if (data.success) { showToast('Сохранено', true); setTimeout(() => location.reload(), 600); }
+      else {
+        var res = document.getElementById('sm-result');
+        res.style.display = 'block';
+        res.innerHTML = '<div class="alert alert-danger py-2 mb-0" style="font-size:12px;">' + (data.error || 'Ошибка') + '</div>';
+      }
+    })
+    .catch(function() { btn.disabled = false; showToast('Ошибка сети', false); });
+});
 </script>
 </body>
 </html>
