@@ -44,7 +44,8 @@ class MetrikaSender
             $headers[] = 'ClientId';
             $values[]  = $clientId;
         } elseif ($yclid) {
-            $headers[] = 'yclid';
+            // По доке Яндекса колонка называется Yclid (с заглавной)
+            $headers[] = 'Yclid';
             $values[]  = $yclid;
         }
 
