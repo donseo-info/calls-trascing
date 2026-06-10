@@ -16,6 +16,7 @@ $knownParams = [
     'contact_phone_number', 'communication_number', 'employee_full_name', 'employee_id',
     'call_source', 'call_session_id', 'direction', 'scenario_name',
     'talk_time_duration', 'total_time_duration', 'wait_time_duration',
+    'contact_id', 'contact_full_name',
 ];
 
 foreach ($knownParams as $p) {

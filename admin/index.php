@@ -1747,8 +1747,17 @@ function buildUrl($extra = []) {
         <pre id="snippet-widget" style="font-size:11px;background:#0f172a;color:#86efac;padding:12px;border-radius:8px;white-space:pre-wrap;word-break:break-all;"></pre>
         <div class="mb-2" style="font-size:11px;color:#64748b;">Номер выводится в элементе с атрибутом <code>data-ct-phone</code>:</div>
         <pre id="snippet-html" style="font-size:11px;background:#0f172a;color:#93c5fd;padding:12px;border-radius:8px;white-space:pre-wrap;word-break:break-all;"></pre>
-        <label class="form-label fw-semibold mt-2" style="font-size:12px;">2. URL вебхука для Novofon</label>
+        <label class="form-label fw-semibold mt-2" style="font-size:12px;">2. Вебхук Novofon</label>
+        <div class="p-2 mb-2 rounded" style="background:#fffbeb;border:1px solid #fde68a;font-size:11px;color:#92400e;line-height:1.6;">
+          <i class="bi bi-info-circle me-1"></i>
+          Личный кабинет Novofon → <strong>Настройки → Уведомления о звонках</strong> →
+          добавить уведомление, метод <strong>GET</strong>, вставить URL ниже.
+          Тип события — «Завершение звонка».
+        </div>
         <pre id="snippet-webhook" style="font-size:11px;background:#0f172a;color:#fbbf24;padding:12px;border-radius:8px;white-space:pre-wrap;word-break:break-all;"></pre>
+        <button type="button" class="btn btn-sm btn-outline-secondary mt-1" id="snippet-webhook-copy" style="font-size:11px;">
+          <i class="bi bi-clipboard me-1"></i>Скопировать URL
+        </button>
       </div>
     </div>
   </div>
@@ -1976,8 +1985,27 @@ document.addEventListener('click', function(e) {
       '<script src="' + base + '/ct.js" data-site="' + key + '"' + counterAttr + '><\/script>';
     document.getElementById('snippet-html').textContent =
       '<span data-ct-phone="+7 (988) 400-70-97"></span>';
-    document.getElementById('snippet-webhook').textContent = base + '/index.php';
+    var webhookParams = [
+      'notification_name={{notification_name}}',
+      'virtual_phone_number={{virtual_phone_number}}',
+      'notification_time={{notification_time}}',
+      'scenario_name={{scenario_name}}',
+      'contact_phone_number={{contact_phone_number}}',
+      'communication_number={{communication_number}}',
+      'contact_id={{contact_id}}',
+      'contact_full_name={{contact_full_name}}',
+      'call_session_id={{call_session_id}}'
+    ].join('&');
+    document.getElementById('snippet-webhook').textContent = base + '/?' + webhookParams;
     snippetModal.show();
+    return;
+  }
+
+  var whCopy = e.target.closest('#snippet-webhook-copy');
+  if (whCopy) {
+    navigator.clipboard.writeText(document.getElementById('snippet-webhook').textContent);
+    showToast('URL вебхука скопирован', true);
+    return;
     return;
   }
 
