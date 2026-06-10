@@ -126,6 +126,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $id    = (int)($_POST['id'] ?? 0);
         $phone = R::load('phonepool', $id);
         if ($phone->id) {
+            // Отвязываем сессии: иначе FK (sessions.phonepool_id) не даст удалить
+            R::exec('UPDATE sessions SET phonepool_id = NULL WHERE phonepool_id = ?', [$id]);
             R::trash($phone);
             echo json_encode(['success' => true]);
         } else {
