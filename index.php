@@ -29,39 +29,45 @@ foreach ($knownParams as $param) {
     $data[$param] = isset($get[$param]) && $get[$param] !== '' ? $get[$param] : null;
 }
 
-// ── 2. Определяем caller / called по direction ────────────────────
-$direction = $data['direction'] ?? null;
-
-if ($direction === 'out') {
-    $callerNumber = $data['virtual_phone_number'];
-    $calledNumber = $data['contact_phone_number'];
-} elseif ($direction === 'in') {
-    $callerNumber = $data['contact_phone_number'];
-    $calledNumber = $data['virtual_phone_number'];
-} else {
-    $callerNumber = $data['contact_phone_number'] ?? null;
-    $calledNumber = $data['virtual_phone_number'] ?? null;
-}
-
-$callTime = $data['notification_time'] ?? date('Y-m-d H:i:s');
-
-// ── 3. Логируем сырые данные ──────────────────────────────────────
-$ts       = '[' . date('Y-m-d H:i:s') . ']';
-$summary  = ['call_time' => $callTime, 'caller' => $callerNumber, 'called' => $calledNumber, 'direction' => $direction];
-$logEntry = $ts . ' SUMMARY: ' . json_encode($summary, JSON_UNESCAPED_UNICODE) . PHP_EOL;
-$logEntry .= $ts . ' RAW:     ' . json_encode($data,    JSON_UNESCAPED_UNICODE) . PHP_EOL;
-file_put_contents(LOG_FILE, $logEntry, FILE_APPEND | LOCK_EX);
-
-// ── 4. Матчинг: ищем сессию по номеру virtual_phone_number ───────
-// virtual_phone_number — это подменный номер, который был показан посетителю
+// ── 2. Пустой вебхук (пинг/healthcheck без данных) — выходим без лога ─
+// Novofon шлёт реальные звонки с virtual_phone_number. Пустые пинги
+// (деплой-хук, мониторинг) не логируем, чтобы не засорять calls.txt.
 $virtualPhone = $data['virtual_phone_number'] ?? null;
-
 if (!$virtualPhone) {
     http_response_code(200);
     echo 'OK (no phone)';
     exit;
 }
 
+// ── 3. Определяем caller / called по direction ────────────────────
+// Novofon в уведомлении «Завершение звонка» НЕ присылает direction.
+// Для нашего сценария это входящий звонок на подменный номер:
+// контакт (клиент) звонит → caller, наш virtual_phone_number → called.
+$direction = $data['direction'] ?? null;
+
+if ($direction === 'out') {
+    $callerNumber = $data['virtual_phone_number'];
+    $calledNumber = $data['contact_phone_number'];
+} else {
+    // 'in' или null (Novofon не прислал) → трактуем как входящий
+    $callerNumber = $data['contact_phone_number'] ?? null;
+    $calledNumber = $data['virtual_phone_number'] ?? null;
+    if ($direction === null) $direction = 'in';
+}
+
+// Время звонка: убираем дробные секунды (.944) — strtotime их не любит
+$callTime = $data['notification_time'] ?? date('Y-m-d H:i:s');
+$callTime = preg_replace('/\.\d+$/', '', $callTime);
+
+// ── 4. Логируем сырые данные ──────────────────────────────────────
+$ts       = '[' . date('Y-m-d H:i:s') . ']';
+$summary  = ['call_time' => $callTime, 'caller' => $callerNumber, 'called' => $calledNumber, 'direction' => $direction];
+$logEntry = $ts . ' SUMMARY: ' . json_encode($summary, JSON_UNESCAPED_UNICODE) . PHP_EOL;
+$logEntry .= $ts . ' RAW:     ' . json_encode($data,    JSON_UNESCAPED_UNICODE) . PHP_EOL;
+file_put_contents(LOG_FILE, $logEntry, FILE_APPEND | LOCK_EX);
+
+// ── 5. Матчинг: ищем сессию по номеру virtual_phone_number ───────
+// virtual_phone_number — это подменный номер, который был показан посетителю
 // Нормализуем номер: убираем всё кроме цифр
 $virtualPhoneClean = preg_replace('/\D/', '', $virtualPhone);
 
