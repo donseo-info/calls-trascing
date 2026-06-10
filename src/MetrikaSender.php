@@ -2,8 +2,8 @@
 /**
  * MetrikaSender — отправка офлайн конверсий в Яндекс Метрику
  *
- * Формат CSV: ClientId,Yclid,phones,Target,DateTime
- * Приоритет идентификатора: ClientId → Yclid → phones
+ * Формат CSV: ClientId,yclid,phones,Target,DateTime
+ * Приоритет идентификатора: ClientId → yclid → phones
  * API: POST https://api-metrica.yandex.net/management/v1/counter/{id}/offline_conversions/upload
  */
 class MetrikaSender
@@ -44,8 +44,7 @@ class MetrikaSender
             $headers[] = 'ClientId';
             $values[]  = $clientId;
         } elseif ($yclid) {
-            // По доке Яндекса колонка называется Yclid (с заглавной)
-            $headers[] = 'Yclid';
+            $headers[] = 'yclid';
             $values[]  = $yclid;
         }
 
