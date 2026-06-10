@@ -1687,8 +1687,26 @@ function buildUrl($extra = []) {
             <input type="text" id="sm-goal" class="form-control form-control-sm" style="font-family:monospace;" placeholder="send_lead">
           </div>
           <div class="col-12">
-            <label class="form-label fw-semibold" style="font-size:12px;">OAuth токен Метрики</label>
+            <label class="form-label fw-semibold d-flex align-items-center gap-2" style="font-size:12px;">
+              OAuth токен Метрики
+              <a href="#" id="sm-token-help-toggle" style="font-size:11px;font-weight:400;text-decoration:none;">
+                <i class="bi bi-question-circle"></i> как получить?
+              </a>
+            </label>
             <input type="text" id="sm-token" class="form-control form-control-sm" style="font-family:monospace;font-size:11px;" placeholder="y0__...">
+            <div id="sm-token-help" class="mt-2 p-3 rounded" style="display:none;background:#eff6ff;border:1px solid #bfdbfe;font-size:11px;color:#1e3a8a;line-height:1.7;">
+              <strong>Получение OAuth-токена Яндекс.Метрики:</strong>
+              <ol class="mb-1 ps-3 mt-1">
+                <li>Создай приложение — <a href="https://oauth.yandex.ru/client/new" target="_blank" rel="noopener">oauth.yandex.ru/client/new</a></li>
+                <li>Платформа «Веб-сервисы», Redirect URI: <code>https://oauth.yandex.ru/verification_code</code></li>
+                <li>Доступы → <strong>Яндекс.Метрика</strong>: отметь «Получение статистики, чтение параметров» и «Запись параметров»</li>
+                <li>Сохрани → скопируй <strong>ClientID</strong> приложения</li>
+                <li>Открой в браузере (подставь ClientID):<br>
+                  <code style="word-break:break-all;">https://oauth.yandex.ru/authorize?response_type=token&amp;client_id=ВАШ_CLIENT_ID</code></li>
+                <li>Подтверди доступ → в адресной строке появится <code>access_token=y0__...</code> — это токен</li>
+              </ol>
+              Аккаунт Яндекса должен иметь доступ к нужному счётчику. Токен живёт ~1 год.
+            </div>
           </div>
           <div class="col-md-6">
             <label class="form-label fw-semibold" style="font-size:12px;">Fallback-номер</label>
@@ -1938,6 +1956,13 @@ function openSiteModal(site) {
 
 var addSiteBtn = document.getElementById('btn-add-site');
 if (addSiteBtn) addSiteBtn.addEventListener('click', function() { openSiteModal(null); });
+
+var tokenHelpToggle = document.getElementById('sm-token-help-toggle');
+if (tokenHelpToggle) tokenHelpToggle.addEventListener('click', function(e) {
+  e.preventDefault();
+  var h = document.getElementById('sm-token-help');
+  h.style.display = h.style.display === 'none' ? 'block' : 'none';
+});
 
 document.addEventListener('click', function(e) {
   var edit = e.target.closest('.btn-edit-site');
