@@ -180,7 +180,17 @@ if ($hasIdentifier && $mToken && $mCounter) {
         file_put_contents(LOG_FILE, $metrikaLog, FILE_APPEND | LOCK_EX);
     } else {
         $metrika   = new MetrikaSender($mToken);
-        $timestamp = strtotime($callTime) ?: time();
+        // Novofon присылает notification_time в МОСКОВСКОМ времени.
+        // Парсим явно как Europe/Moscow — иначе при иной TZ сервера strtotime
+        // даёт неверный (часто будущий) инстант → Метрика отвечает 400.
+        try {
+            $dt = new DateTime($callTime, new DateTimeZone('Europe/Moscow'));
+            $timestamp = $dt->getTimestamp();
+        } catch (Exception $e) {
+            $timestamp = strtotime($callTime) ?: time();
+        }
+        // Подстраховка от рассинхрона часов: будущее время Метрика отвергает
+        if ($timestamp > time()) $timestamp = time();
 
         $result = $metrika->send(
             $mCounter,
