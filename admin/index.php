@@ -1984,7 +1984,7 @@ document.addEventListener('click', function(e) {
     var base = snip.dataset.base, key = snip.dataset.key, counter = snip.dataset.counter || '';
     var counterAttr = counter ? ' data-counter="' + counter + '"' : '';
     document.getElementById('snippet-widget').textContent =
-      '<script src="' + base + '/ct.js" data-site="' + key + '"' + counterAttr + '><\/script>';
+      '<script src="' + base + '/ct.js" data-site="' + key + '"' + counterAttr + ' async><\/script>';
     document.getElementById('snippet-html').textContent =
       '<span data-ct-phone="+7 (988) 400-70-97"></span>';
     var webhookParams = [
