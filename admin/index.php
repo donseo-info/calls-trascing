@@ -188,6 +188,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $phone     = trim($_POST['phone']     ?? '') ?: null;
         $datetime  = trim($_POST['datetime']  ?? '');
         $timestamp = $datetime ? strtotime($datetime) : time();
+        // Метрика отвергает конверсии с DateTime в будущем (HTTP 400).
+        // datetime-local приходит во времени браузера — при сдвиге таймзоны
+        // относительно сервера время может улететь в будущее. Клэмпим к now.
+        if (!$timestamp || $timestamp > time()) $timestamp = time();
 
         if (!$callId) {
             echo json_encode(['success' => false, 'error' => 'no call_id']);
