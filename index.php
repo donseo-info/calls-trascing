@@ -77,6 +77,7 @@ R::freeze(true);
 
 // Миграция: добавляем sent_client_id / site_id если ещё нет
 try { R::exec('ALTER TABLE calls ADD COLUMN sent_client_id TEXT'); } catch (Exception $e) {}
+try { R::exec("ALTER TABLE sites ADD COLUMN timezone TEXT DEFAULT 'Europe/Moscow'"); } catch (Exception $e) {}
 try { R::exec('ALTER TABLE calls ADD COLUMN site_id INTEGER'); } catch (Exception $e) {}
 
 $now = date('Y-m-d H:i:s');
@@ -180,11 +181,13 @@ if ($hasIdentifier && $mToken && $mCounter) {
         file_put_contents(LOG_FILE, $metrikaLog, FILE_APPEND | LOCK_EX);
     } else {
         $metrika   = new MetrikaSender($mToken);
-        // Novofon присылает notification_time в МОСКОВСКОМ времени.
-        // Парсим явно как Europe/Moscow — иначе при иной TZ сервера strtotime
-        // даёт неверный (часто будущий) инстант → Метрика отвечает 400.
+        // Novofon шлёт notification_time в таймзоне аккаунта (Питер UTC+3,
+        // ЕКБ UTC+5 и т.д.) — задаётся на каждый сайт. Парсим явно в TZ сайта,
+        // иначе при иной TZ сервера strtotime даёт неверный (часто будущий)
+        // инстант → Метрика отвечает 400.
+        $siteTz = !empty($site['timezone']) ? $site['timezone'] : 'Europe/Moscow';
         try {
-            $dt = new DateTime($callTime, new DateTimeZone('Europe/Moscow'));
+            $dt = new DateTime($callTime, new DateTimeZone($siteTz));
             $timestamp = $dt->getTimestamp();
         } catch (Exception $e) {
             $timestamp = strtotime($callTime) ?: time();

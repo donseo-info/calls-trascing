@@ -28,6 +28,7 @@ R::exec("CREATE TABLE IF NOT EXISTS sites (
     metrika_goal_id       TEXT,
     fallback_phone        TEXT,
     session_ttl_minutes   INTEGER NOT NULL DEFAULT 10,
+    timezone              TEXT DEFAULT 'Europe/Moscow',
     is_active             INTEGER NOT NULL DEFAULT 1,
     created_at            TEXT NOT NULL DEFAULT (datetime('now'))
 )");

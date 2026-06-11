@@ -10,6 +10,7 @@ R::freeze(true);
 
 // ── Миграции (на случай если migrate_multisite.php ещё не запускали) ──
 try { R::exec('ALTER TABLE calls ADD COLUMN sent_client_id TEXT'); } catch (Exception $e) {}
+try { R::exec("ALTER TABLE sites ADD COLUMN timezone TEXT DEFAULT 'Europe/Moscow'"); } catch (Exception $e) {}
 R::exec("CREATE TABLE IF NOT EXISTS sites (
     id                    INTEGER PRIMARY KEY AUTOINCREMENT,
     name                  TEXT NOT NULL,
@@ -152,6 +153,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $site->metrika_goal_id      = trim($_POST['metrika_goal_id'] ?? '') ?: 'send_lead';
             $site->fallback_phone       = trim($_POST['fallback_phone'] ?? '');
             $site->session_ttl_minutes  = (int)($_POST['session_ttl_minutes'] ?? 10) ?: 10;
+            $site->timezone             = trim($_POST['timezone'] ?? '') ?: 'Europe/Moscow';
             $site->is_active            = isset($_POST['is_active']) ? (int)$_POST['is_active'] : 1;
             if (!$id) {
                 $site->site_key   = bin2hex(random_bytes(8));
@@ -1722,6 +1724,21 @@ function buildUrl($extra = []) {
             <label class="form-label fw-semibold" style="font-size:12px;">TTL (мин)</label>
             <input type="number" id="sm-ttl" class="form-control form-control-sm" value="10" min="1">
           </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold" style="font-size:12px;">Таймзона аккаунта Novofon</label>
+            <select id="sm-timezone" class="form-select form-select-sm">
+              <option value="Europe/Moscow">Москва / Питер (UTC+3)</option>
+              <option value="Europe/Samara">Самара (UTC+4)</option>
+              <option value="Asia/Yekaterinburg">Екатеринбург (UTC+5)</option>
+              <option value="Asia/Omsk">Омск (UTC+6)</option>
+              <option value="Asia/Krasnoyarsk">Красноярск (UTC+7)</option>
+              <option value="Asia/Irkutsk">Иркутск (UTC+8)</option>
+              <option value="Asia/Yakutsk">Якутск (UTC+9)</option>
+              <option value="Asia/Vladivostok">Владивосток (UTC+10)</option>
+              <option value="Europe/Kaliningrad">Калининград (UTC+2)</option>
+            </select>
+            <div class="form-text" style="font-size:10px;">В каком времени Novofon шлёт notification_time</div>
+          </div>
           <div class="col-md-3">
             <label class="form-label fw-semibold" style="font-size:12px;">Статус</label>
             <select id="sm-active" class="form-select form-select-sm">
@@ -1964,6 +1981,7 @@ function openSiteModal(site) {
   document.getElementById('sm-token').value    = site ? (site.metrika_access_token || '') : '';
   document.getElementById('sm-fallback').value = site ? (site.fallback_phone || '') : '';
   document.getElementById('sm-ttl').value      = site ? (site.session_ttl_minutes || 10) : 10;
+  document.getElementById('sm-timezone').value = site ? (site.timezone || 'Europe/Moscow') : 'Europe/Moscow';
   document.getElementById('sm-active').value   = site ? (site.is_active ? '1' : '0') : '1';
   document.getElementById('sm-result').style.display = 'none';
   siteModal.show();
@@ -2047,6 +2065,7 @@ if (smSubmit) smSubmit.addEventListener('click', function() {
   fd.append('metrika_access_token', document.getElementById('sm-token').value.trim());
   fd.append('fallback_phone',       document.getElementById('sm-fallback').value.trim());
   fd.append('session_ttl_minutes',  document.getElementById('sm-ttl').value);
+  fd.append('timezone',             document.getElementById('sm-timezone').value);
   fd.append('is_active',            document.getElementById('sm-active').value);
   fetch(window.location.pathname, { method: 'POST', body: fd })
     .then(r => r.json())
