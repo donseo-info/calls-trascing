@@ -168,6 +168,10 @@
 
   // ── Разметка виджета ─────────────────────────────────────────────
   function renderWidget(el) {
+    // Защита от повторной инициализации одного элемента
+    if (el.dataset.ctInit === '1') return;
+    el.dataset.ctInit = '1';
+
     var fallback = (el.dataset.ctPhone || '').trim();
     var fmt = fallback ? formatPhone(fallback) : null;
 
@@ -266,12 +270,23 @@
       });
   }
 
+  // ── Сканирование и рендер всех виджетов на странице ──────────────
+  function scan() {
+    var els = document.querySelectorAll('[data-ct-phone]');
+    for (var i = 0; i < els.length; i++) renderWidget(els[i]);
+  }
+
   // ── Инициализация ─────────────────────────────────────────────────
   function init() {
     injectStyles();
     prefetchClientId(); // получаем clientId в фоне, до клика пользователя
-    var els = document.querySelectorAll('[data-ct-phone]');
-    for (var i = 0; i < els.length; i++) renderWidget(els[i]);
+    scan();
+
+    // Следим за динамически добавленными номерами (SPA, поздняя подгрузка)
+    if (window.MutationObserver) {
+      var obs = new MutationObserver(function () { scan(); });
+      try { obs.observe(document.body, { childList: true, subtree: true }); } catch (e) {}
+    }
   }
 
   if (document.readyState === 'loading') {
