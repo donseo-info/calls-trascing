@@ -195,10 +195,13 @@ if ($hasIdentifier && $mToken && $mCounter) {
             R::exec('UPDATE calls SET goal_sent = 1, sent_client_id = ? WHERE id = ?', [$clientId ?: null, $callId]);
         }
 
+        // CSV содержит переносы строк — схлопываем в один пробел,
+        // чтобы вся запись (включая response) осталась одной строкой лога
+        $csvInline = str_replace(["\r\n", "\n", "\r"], ' | ', trim($result['csv'] ?? ''));
         $metrikaLog = $ts . ' METRIKA: success=' . ($result['success'] ? 'true' : 'false')
                     . ' http=' . ($result['http_code'] ?? '?')
                     . ' error=' . ($result['error'] ?? 'none')
-                    . ' csv=[' . trim($result['csv'] ?? '') . ']'
+                    . ' csv=[' . $csvInline . ']'
                     . ' response=' . ($result['raw_response'] ?? 'none') . PHP_EOL;
         file_put_contents(LOG_FILE, $metrikaLog, FILE_APPEND | LOCK_EX);
     }
