@@ -2013,6 +2013,8 @@ document.addEventListener('click', function(e) {
       'notification_name={{notification_name}}',
       'virtual_phone_number={{virtual_phone_number}}',
       'notification_time={{notification_time}}',
+      'notification_timestamp={{notification_timestamp}}',
+      'direction={{direction}}',
       'scenario_name={{scenario_name}}',
       'contact_phone_number={{contact_phone_number}}',
       'communication_number={{communication_number}}',

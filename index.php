@@ -16,7 +16,7 @@ $knownParams = [
     'contact_phone_number', 'communication_number', 'employee_full_name', 'employee_id',
     'call_source', 'call_session_id', 'direction', 'scenario_name',
     'talk_time_duration', 'total_time_duration', 'wait_time_duration',
-    'contact_id', 'contact_full_name',
+    'contact_id', 'contact_full_name', 'notification_timestamp',
 ];
 
 foreach ($knownParams as $p) {
@@ -180,17 +180,22 @@ if ($hasIdentifier && $mToken && $mCounter) {
         $metrikaLog = $ts . ' METRIKA: duplicate client_id=' . $clientId . ' goal not sent' . PHP_EOL;
         file_put_contents(LOG_FILE, $metrikaLog, FILE_APPEND | LOCK_EX);
     } else {
-        $metrika   = new MetrikaSender($mToken);
-        // Novofon шлёт notification_time в таймзоне аккаунта (Питер UTC+3,
-        // ЕКБ UTC+5 и т.д.) — задаётся на каждый сайт. Парсим явно в TZ сайта,
-        // иначе при иной TZ сервера strtotime даёт неверный (часто будущий)
-        // инстант → Метрика отвечает 400.
-        $siteTz = !empty($site['timezone']) ? $site['timezone'] : 'Europe/Moscow';
-        try {
-            $dt = new DateTime($callTime, new DateTimeZone($siteTz));
-            $timestamp = $dt->getTimestamp();
-        } catch (Exception $e) {
-            $timestamp = strtotime($callTime) ?: time();
+        $metrika = new MetrikaSender($mToken);
+
+        // Время конверсии. Приоритет — notification_timestamp (Unix, абсолютный,
+        // не зависит от таймзоны). Если его нет — парсим строку notification_time
+        // в таймзоне сайта (Novofon шлёт время в TZ аккаунта: Питер/ЕКБ/...).
+        $nts = $data['notification_timestamp'] ?? null;
+        if ($nts && ctype_digit((string)$nts)) {
+            $timestamp = (int)$nts;
+        } else {
+            $siteTz = !empty($site['timezone']) ? $site['timezone'] : 'Europe/Moscow';
+            try {
+                $dt = new DateTime($callTime, new DateTimeZone($siteTz));
+                $timestamp = $dt->getTimestamp();
+            } catch (Exception $e) {
+                $timestamp = strtotime($callTime) ?: time();
+            }
         }
         // Подстраховка от рассинхрона часов: будущее время Метрика отвергает
         if ($timestamp > time()) $timestamp = time();
