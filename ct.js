@@ -101,6 +101,7 @@
 
       /* Текст номера */
       '.ct-phone-text{white-space:nowrap}',
+      '.ct-phone-reveal.ct-revealed{cursor:pointer}',
       /* Видимая часть */
       '.ct-phone-visible{}',
       /* Fade-часть: последние цифры уходят в прозрачность под кнопку */
@@ -218,17 +219,12 @@
 
   // ── Клик: запрос к API → раскрытие ───────────────────────────────
   function handleClick(widget) {
-    // Уже раскрыт — копируем
+    // Уже раскрыт — инициируем звонок как tel:
     if (widget.classList.contains('ct-revealed')) {
       var full = widget.dataset.fullPhone;
       if (!full) return;
-      if (navigator.clipboard) {
-        navigator.clipboard.writeText(full)
-          .then(function () { showToast('Номер скопирован'); })
-          .catch(function () { showToast(full); });
-      } else {
-        showToast(full);
-      }
+      var digits = full.replace(/\D/g, '');
+      if (digits) window.location.href = 'tel:+' + digits;
       return;
     }
 
